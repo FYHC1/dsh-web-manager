@@ -1,0 +1,19 @@
+# Prebuilt EXE is shipped in the repo (dist/ is the release layout).
+dist/*
+!dist/dsh-web-manager.exe
+!dist/assets/
+!dist/config.example.json
+!dist/LICENSE
+!dist/README.md
+!dist/Install.ps1
+!dist/Uninstall.ps1
+
+# Local data
+*.user
+*.suo
+.vs/
+
+# OS noise
+Thumbs.db
+Desktop.ini
+.DS_Store

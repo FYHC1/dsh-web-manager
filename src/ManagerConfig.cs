@@ -1,0 +1,106 @@
+﻿using System;
+using System.IO;
+using System.Web.Script.Serialization;
+
+namespace DshWebManager
+{
+    /// <summary>Persisted manager configuration (shared, visible from Windows and WSL).</summary>
+    public sealed class WindowConfig
+    {
+        public string Size { get; set; }       // "WxH"
+        public string Position { get; set; }   // "X,Y"
+    }
+
+    public sealed class ManagerConfig
+    {
+        public int Port { get; set; }
+        public bool AutoFallback { get; set; }
+        public string DataDir { get; set; }
+        public bool CloseStopsService { get; set; }
+        public bool ExitKeepService { get; set; }
+        public bool AutoStart { get; set; }
+        public WindowConfig Window { get; set; }
+        public string BackendType { get; set; }   // "windows" | "wsl" (v2.1)
+        public string Profile { get; set; }        // dsh profile name (default web)
+        public string Version { get; set; }
+
+        public ManagerConfig()
+        {
+            Port = 3080;
+            AutoFallback = true;
+            DataDir = String.Empty;
+            CloseStopsService = false;
+            ExitKeepService = false;
+            AutoStart = false;
+            Window = new WindowConfig();
+            BackendType = "windows";
+            Profile = "web";
+            Version = "2.0.0";
+        }
+
+        public static ManagerConfig Load()
+        {
+            ManagerConfig cfg = new ManagerConfig();
+            string path = AppPaths.ConfigFile;
+            if (File.Exists(path))
+            {
+                try
+                {
+                    JavaScriptSerializer ser = new JavaScriptSerializer();
+                    ManagerConfig loaded = ser.Deserialize<ManagerConfig>(File.ReadAllText(path));
+                    if (loaded != null)
+                    {
+                        if (loaded.Window == null) loaded.Window = new WindowConfig();
+                        if (String.IsNullOrEmpty(loaded.BackendType)) loaded.BackendType = "windows";
+                        if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
+                        return loaded;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    FileLog.Error("Failed to read config, using defaults: " + ex.Message);
+                }
+            }
+            return cfg;
+        }
+
+        public void Save()
+        {
+            try
+            {
+                AppPaths.EnsureDirectories();
+                JavaScriptSerializer ser = new JavaScriptSerializer();
+                string json = ser.Serialize(this);
+                File.WriteAllText(AppPaths.ConfigFile, json);
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("Failed to write config: " + ex.Message);
+            }
+        }
+
+        /// <summary>Migrates the legacy v1.x "window-size" file ("W,H" lines) into Window.Size.</summary>
+        public void MigrateLegacyWindowSize()
+        {
+            if (!String.IsNullOrEmpty(Window.Size)) return;
+            string legacy = AppPaths.LegacyWindowSizeFile;
+            if (!File.Exists(legacy)) return;
+            try
+            {
+                string text = File.ReadAllText(legacy).Trim();
+                string[] parts = text.Split(new char[] { ',', 'x', 'X', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
+                {
+                    int w, h;
+                    if (int.TryParse(parts[0], out w) && int.TryParse(parts[1], out h) && w > 400 && h > 300)
+                        Window.Size = w + "x" + h;
+                    FileLog.Info("Migrated legacy window-size: " + Window.Size);
+                }
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("Legacy window-size migration failed: " + ex.Message);
+            }
+        }
+    }
+}

@@ -1,0 +1,20 @@
+{
+  "port": 3080,
+  "autoFallback": true,
+  "dataDir": "",
+  "closeStopsService": false,
+  "exitKeepService": false,
+  "autoStart": false,
+  "window": {
+    "size": "",
+    "position": ""
+  },
+  "backend": {
+    "type": "windows"
+  },
+  "profile": "web",
+  "manager": {
+    "version": "0.2.0",
+    "lastStartUtc": ""
+  }
+}
