@@ -1,4 +1,4 @@
-# 验证矩阵（v2.0 真机实测记录）
+﻿# 验证矩阵（v2.0 真机实测记录）
 
 测试机：Windows 11 + WSL2 FedoraLinux44；dsh 命令 `C:\nvm4w\nodejs\dsh.cmd`
 测试端口：3093 / 3095（绝不用 3080 做破坏性实验）；用户 3080 服务（PID 25080）全程不动。
@@ -19,7 +19,9 @@
 
 - `dsh web` 是错误用法；正确语法为 `dsh --profile <profile> [--host 127.0.0.1] --port <port>`。
 - Windows 侧访问 npmjs.org 不通：dsh 构建 profile 依赖时须走 npmmirror 镜像，或直接用既有 profile 目录。
-- 用户 web profile 的 `dsh-better-sidebar` 插件缺依赖且 .pnpm store 为空：已在 patch 层 `disabled: true` 使其可启动（备份：
-  `%TEMP%\dwm-cordis.patch.bak.yml`；恢复方法见 README「修复 web profile」）。
+- 用户 web profile 的 `dsh-better-sidebar` 插件曾缺依赖：已用
+  `npm install --prefix ...\dsh-better-sidebar --registry=https://registry.npmmirror.com --ignore-scripts`
+  补齐全部依赖（schemastery 等 207 包），并恢复 patch 中该插件为启用状态；
+  dsh web 完整启动验证通过（HTTP 200）。
 - 启动子进程用 `cmd /d /s /c ""dsh.cmd" args"` + 异步流捕获（重定向到文件在 UNC 工作目录下会失败）。
 - 二次实例经命名管道转发动作；`exit` 用 `Environment.Exit` 保证托盘进程必然终止。
