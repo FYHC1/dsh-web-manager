@@ -65,3 +65,21 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 ## 许可
 
 MIT
+## 任务栏图标说明（Windows）
+
+窗口图标由管理器通过 `WM_SETICON` 持续设置（32/16px，官方 `DeepSeek Harness.ico`），
+验证方式：`WM_GETICON` 像素采样与官方图标一致。
+
+**注意**：若任务栏启用了「合并任务栏按钮」（TaskbarGlomLevel 0/1，Win10 生效），
+多个同进程窗口（如 Edge 的多个 `--app` 窗口）会被合并成单个按钮并显示**进程图标
+（Edge）**，即使每个窗口自身的图标都是 DeepSeek 鲸鱼。
+
+要使 DSH 窗口在任务栏显示鲸鱼图标，请将任务栏设置为「从不合并」：
+- 设置 → 个性化 → 任务栏 → 「合并任务栏按钮」→「从不合并」
+- 或注册表：`HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced` 下
+  `TaskbarGlomLevel = 2`，然后重启资源管理器（explorer）生效。
+
+> 为什么不通过 AUMID 在代码层解决？Chromium 的 `--app` 窗口在 Windows 上
+> 不接受外部进程写入窗口 AppUserModelID（`SHGetPropertyStoreForWindow` 的
+> `SetValue` 对 Chromium 窗口抛 `0x80070002`，普通窗口正常）。AUMID 由页面
+> manifest 决定，外部无法覆盖。
