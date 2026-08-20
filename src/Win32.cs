@@ -78,5 +78,35 @@ namespace DshWebManager
             try { return ExtractIcon(IntPtr.Zero, AppPaths.ExePath, 0); }
             catch { return IntPtr.Zero; }
         }
+
+        // ---- AppUserModelID support (drives the taskbar icon/grouping) ----
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PropertyKey
+        {
+            public Guid fmtid;
+            public uint pid;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        public struct PropVariant
+        {
+            [FieldOffset(0)] public ushort vt;
+            [FieldOffset(8)] public IntPtr pwszVal;
+        }
+
+        [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        public interface IPropertyStore
+        {
+            int GetCount(out uint cProps);
+            int GetAt(uint iProp, out PropertyKey pkey);
+            int GetValue(ref PropertyKey key, out PropVariant pv);
+            int SetValue(ref PropertyKey key, ref PropVariant pv);
+            int Commit();
+        }
+
+        [DllImport("shell32.dll", PreserveSig = true)]
+        public static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, out IntPtr ppv);
+
+        public const ushort VT_LPWSTR = 31;
     }
 }

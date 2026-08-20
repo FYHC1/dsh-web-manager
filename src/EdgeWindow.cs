@@ -15,6 +15,10 @@ namespace DshWebManager
         private static IntPtr _bigIcon;
         private static IntPtr _smallIcon;
         private static string _iconSource = String.Empty;
+        private static IntPtr _lastAumidHwnd = IntPtr.Zero;
+        private static readonly Guid PkeyAppUserModelFmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+        private const uint PidAppUserModelId = 5;
+        private const uint PidRelaunchIcon = 2;
 
         public static string FindEdgeExe()
         {
@@ -35,9 +39,14 @@ namespace DshWebManager
             if (edge == null) throw new InvalidOperationException("Microsoft Edge was not found.");
 
             string url = "http://127.0.0.1:" + port + "/";
-            string args = "--app=" + url;
-            if (!String.IsNullOrEmpty(config.DataDir))
-                args += " --user-data-dir=\"" + config.DataDir + "\"";
+            // A dedicated, isolated browser profile is REQUIRED: without it Edge
+            // merges the --app request into the default profile's running instance
+            // (single-instance semantics), the app window never becomes a standalone
+            // window, and the manager can neither find it nor set its taskbar icon.
+            string dataDir = config.DataDir;
+            if (String.IsNullOrEmpty(dataDir))
+                dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-web-manager-browser");
+            string args = "--app=" + url + " --user-data-dir=\"" + dataDir + "\"";
             if (!String.IsNullOrEmpty(config.Window.Size))
                 args += " --window-size=" + config.Window.Size;
             if (!String.IsNullOrEmpty(config.Window.Position))
@@ -119,6 +128,59 @@ namespace DshWebManager
                 Win32.SendMessageW(h, Win32.WM_SETICON, new IntPtr(Win32.ICON_BIG), _bigIcon);
             if (_smallIcon != IntPtr.Zero)
                 Win32.SendMessageW(h, Win32.WM_SETICON, new IntPtr(Win32.ICON_SMALL), _smallIcon);
+            // Taskbar icon is driven by the window's AppUserModelID: give the app
+            // window a stable AUMID whose relaunch icon is the official DSH .ico.
+            // Only applied once per window handle (property set is idempotent and
+            // re-applying would leak COM references).
+            if (h != _lastAumidHwnd)
+            {
+                _lastAumidHwnd = h;
+                ApplyAumidToWindow(h, "DeepSeekHarness.WebUI", AppPaths.IconFile);
+            }
+        }
+
+        /// <summary>
+        /// Sets PKEY_AppUserModel_ID and PKEY_AppUserModel_RelaunchIcon on the
+        /// window's property store so the taskbar shows the DSH whale icon
+        /// instead of the Edge default (WM_SETICON alone does not drive the
+        /// taskbar button for Chromium app windows).
+        /// </summary>
+        public static void ApplyAumidToWindow(IntPtr hwnd, string aumid, string relaunchIcon)
+        {
+            if (hwnd == IntPtr.Zero || String.IsNullOrEmpty(aumid) || String.IsNullOrEmpty(relaunchIcon)) return;
+            if (!System.IO.File.Exists(relaunchIcon)) return;
+            try
+            {
+                Guid iid = new Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99");
+                IntPtr storePtr;
+                int hr = Win32.SHGetPropertyStoreForWindow(hwnd, ref iid, out storePtr);
+                if (hr != 0 || storePtr == IntPtr.Zero) return;
+                Win32.IPropertyStore store = (Win32.IPropertyStore)System.Runtime.InteropServices.Marshal.GetObjectForIUnknown(storePtr);
+                try
+                {
+                    // PKEY_AppUserModel_ID
+                    Win32.PropertyKey idKey = new Win32.PropertyKey { fmtid = PkeyAppUserModelFmtid, pid = PidAppUserModelId };
+                    Win32.PropVariant pvId = new Win32.PropVariant { vt = Win32.VT_LPWSTR, pwszVal = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUni(aumid) };
+                    store.SetValue(ref idKey, ref pvId);
+                    // PKEY_AppUserModel_RelaunchIcon
+                    Win32.PropertyKey iconKey = new Win32.PropertyKey { fmtid = PkeyAppUserModelFmtid, pid = PidRelaunchIcon };
+                    Win32.PropVariant pvIcon = new Win32.PropVariant { vt = Win32.VT_LPWSTR, pwszVal = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUni(relaunchIcon) };
+                    store.SetValue(ref iconKey, ref pvIcon);
+                    int commitHr = store.Commit();
+                    System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pvId.pwszVal);
+                    System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pvIcon.pwszVal);
+                    FileLog.Info("AUMID applied to window 0x" + hwnd.ToInt64().ToString("X") + " (aumid=" + aumid + ", hr=" + commitHr + ")");
+                }
+                finally
+                {
+                    System.Runtime.InteropServices.Marshal.Release(storePtr);
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(store);
+                }
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("AUMID apply failed: " + ex.Message);
+            }
         }
 
         private static void EnsureIcons()
