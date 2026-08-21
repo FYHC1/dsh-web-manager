@@ -1,4 +1,4 @@
-﻿﻿﻿using System;
+﻿﻿﻿﻿using System;
 using System.IO;
 using System.Web.Script.Serialization;
 
@@ -25,6 +25,7 @@ namespace DshWebManager
         public string WslDistro { get; set; }     // pinned WSL distro; empty = auto (v2.1)
         public string WslServiceMode { get; set; } // "wrapper" | "systemd" (v3.0); systemd unavailable -> auto fallback to wrapper
         public string LastWslDistro { get; set; } // remembered last working distro (v3.0, auto distro selection)
+        public string BridgeToken { get; set; }   // dsh runtime bridge shared secret (v3.0)
         public string Profile { get; set; }        // dsh profile name (default web)
         public string Version { get; set; }
 
@@ -55,6 +56,7 @@ namespace DshWebManager
             WslDistro = String.Empty;
             WslServiceMode = "wrapper";
             LastWslDistro = String.Empty;
+            BridgeToken = String.Empty;
             Profile = "web";
             Version = "2.1.0";
         }
@@ -77,6 +79,7 @@ namespace DshWebManager
                         if (loaded.WslDistro == null) loaded.WslDistro = String.Empty;
                         if (String.IsNullOrEmpty(loaded.WslServiceMode)) loaded.WslServiceMode = "wrapper";
                         if (loaded.LastWslDistro == null) loaded.LastWslDistro = String.Empty;
+                        if (loaded.BridgeToken == null) loaded.BridgeToken = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
                         if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "2.1.0";
                         return loaded;

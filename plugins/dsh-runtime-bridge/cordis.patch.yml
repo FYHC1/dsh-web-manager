@@ -1,0 +1,5 @@
+# dsh-runtime-bridge: authoritative status + graceful shutdown over loopback TCP.
+# Injected via the dsh profile bundle mechanism (package.json dsh.bundle.patch).
+- insert:
+    - id: dsh-runtime-bridge
+      name: 'dsh-runtime-bridge'

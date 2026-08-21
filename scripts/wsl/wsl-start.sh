@@ -8,6 +8,8 @@ set -u
 
 PROFILE="${1:-web}"
 PORT="${2:-3080}"
+BRIDGE_PORT="${3:-0}"
+BRIDGE_TOKEN="${4:-}"
 HOST="127.0.0.1"
 DWM_DIR="$HOME/.dsh-webui"
 PIDFILE="$DWM_DIR/wsl-dsh.pid"
@@ -55,7 +57,9 @@ fi
 
 CRASHES=0
 while true; do
-  log "launching dsh --profile $PROFILE --host $HOST --port $PORT"
+  log "launching dsh --profile $PROFILE --host $HOST --port $PORT (bridge=$BRIDGE_PORT)"
+  DSH_BRIDGE_PORT="$BRIDGE_PORT" DSH_BRIDGE_TOKEN="$BRIDGE_TOKEN" \
+  DSH_PROFILE="$PROFILE" DSH_WEB_PORT="$PORT" DSH_WEB_HOST="$HOST" \
   dsh --profile "$PROFILE" --host "$HOST" --port "$PORT" >> "$LOG" 2>&1 &
   DSH_PID=$!
   echo "$DSH_PID" > "$PIDFILE"

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -401,6 +401,52 @@ namespace DshWebManager
             catch { return 0; }
         }
 
+        /// <summary>
+        /// Queries the dsh runtime bridge (inside WSL, reached via localhost forwarding)
+        /// with a versioned JSON request. Returns the raw response line or null on failure.
+        /// </summary>
+        public static string BridgeQuery(int bridgePort, string token, string method, int timeoutMs)
+        {
+            if (bridgePort <= 0 || String.IsNullOrEmpty(token)) return null;
+            try
+            {
+                using (System.Net.Sockets.TcpClient client = new System.Net.Sockets.TcpClient())
+                {
+                    IAsyncResult ar = client.BeginConnect("127.0.0.1", bridgePort, null, null);
+                    if (!ar.AsyncWaitHandle.WaitOne(1500)) return null;
+                    client.EndConnect(ar);
+                    System.Net.Sockets.NetworkStream stream = client.GetStream();
+                    string req = "{\"v\":1,\"method\":\"" + method + "\",\"token\":\"" + token + "\"}\n";
+                    byte[] data = Encoding.UTF8.GetBytes(req);
+                    stream.Write(data, 0, data.Length);
+                    stream.Flush();
+                    StringBuilder sb = new StringBuilder();
+                    byte[] buf = new byte[4096];
+                    DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+                    while (DateTime.UtcNow < deadline)
+                    {
+                        if (stream.DataAvailable)
+                        {
+                            int read = stream.Read(buf, 0, buf.Length);
+                            if (read <= 0) break;
+                            sb.Append(Encoding.UTF8.GetString(buf, 0, read));
+                            if (sb.ToString().IndexOf("\n") >= 0) break;
+                        }
+                        else
+                        {
+                            System.Threading.Thread.Sleep(100);
+                        }
+                    }
+                    return sb.ToString().Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("WslTools.BridgeQuery: " + ex.Message);
+                return null;
+            }
+        }
+
         /// <summary>Quotes one argument for the Windows command line (CommandLineToArgvW).</summary>
         public static string QuoteArgument(string value)
         {
@@ -600,7 +646,7 @@ namespace DshWebManager
         /// profile+port into ~/.config/systemd/user/. Writing files does not require
         /// systemd to be running, so this works even before /etc/wsl.conf is enabled.
         /// </summary>
-        public static bool EnsureSystemdFiles(string distro, string profile, int port)
+        public static bool EnsureSystemdFiles(string distro, string profile, int port, int bridgePort, string bridgeToken)
         {
             try
             {
@@ -614,7 +660,8 @@ namespace DshWebManager
                     + "After=network.target\n\n"
                     + "[Service]\n"
                     + "Type=simple\n"
-                    + "ExecStart=%h/.dsh-webui/wsl-systemd-start.sh " + profile + " " + port + "\n"
+                    + "ExecStart=%h/.dsh-webui/wsl-systemd-start.sh " + profile + " " + port
+                    + " " + bridgePort + " " + BashQuote(bridgeToken) + "\n"
                     + "Restart=on-failure\n"
                     + "RestartSec=3\n"
                     + "Environment=HOME=%h\n\n"
@@ -655,6 +702,8 @@ set -u
 
 PROFILE=""${1:-web}""
 PORT=""${2:-3080}""
+BRIDGE_PORT=""${3:-0}""
+BRIDGE_TOKEN=""${4:-}""
 HOST=""127.0.0.1""
 DWM_DIR=""$HOME/.dsh-webui""
 PIDFILE=""$DWM_DIR/wsl-dsh.pid""
@@ -702,7 +751,9 @@ fi
 
 CRASHES=0
 while true; do
-  log ""launching dsh --profile $PROFILE --host $HOST --port $PORT""
+  log ""launching dsh --profile $PROFILE --host $HOST --port $PORT (bridge=$BRIDGE_PORT)""
+  DSH_BRIDGE_PORT=""$BRIDGE_PORT"" DSH_BRIDGE_TOKEN=""$BRIDGE_TOKEN"" \
+  DSH_PROFILE=""$PROFILE"" DSH_WEB_PORT=""$PORT"" DSH_WEB_HOST=""$HOST"" \
   dsh --profile ""$PROFILE"" --host ""$HOST"" --port ""$PORT"" >> ""$LOG"" 2>&1 &
   DSH_PID=$!
   echo ""$DSH_PID"" > ""$PIDFILE""
@@ -740,6 +791,8 @@ set -u
 
 PROFILE=""${1:-web}""
 PORT=""${2:-3080}""
+BRIDGE_PORT=""${3:-0}""
+BRIDGE_TOKEN=""${4:-}""
 HOST=""127.0.0.1""
 
 # --- toolchain bootstrap (best effort, same as wsl-start.sh) ---
@@ -759,8 +812,14 @@ if ! command -v dsh >/dev/null 2>&1; then
   exit 2
 fi
 
+export DSH_BRIDGE_PORT=""$BRIDGE_PORT""
+export DSH_BRIDGE_TOKEN=""$BRIDGE_TOKEN""
+export DSH_PROFILE=""$PROFILE""
+export DSH_WEB_PORT=""$PORT""
+export DSH_WEB_HOST=""$HOST""
 exec dsh --profile ""$PROFILE"" --host ""$HOST"" --port ""$PORT""
 ";
+
 
 
     }

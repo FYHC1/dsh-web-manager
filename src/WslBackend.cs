@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -141,22 +141,43 @@ namespace DshWebManager
                 return false;
             }
             _lastPort = port;
+            EnsureBridgeToken();
             bool ok = _mode == WslServiceModeKind.Systemd
                 ? StartSystemd(port, profile)
                 : StartWrapper(port, profile);
-            if (ok && !String.Equals(_config.LastWslDistro, _distro, StringComparison.OrdinalIgnoreCase))
+            if (ok)
             {
-                // Remember the working distro so auto selection survives a WSL restart
-                // (a stopped default distro must not win over the real one).
-                _config.LastWslDistro = _distro;
-                _config.Save();
+                if (!String.Equals(_config.LastWslDistro, _distro, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Remember the working distro so auto selection survives a WSL restart
+                    // (a stopped default distro must not win over the real one).
+                    _config.LastWslDistro = _distro;
+                    _config.Save();
+                }
+                string ping = WslTools.BridgeQuery(BridgePort(port), _config.BridgeToken, "ping", 2500);
+                if (ping != null)
+                    FileLog.Info("WslBackend: runtime bridge ping ok (" + ping + ")");
+                else
+                    FileLog.Info("WslBackend: runtime bridge not reachable on port " + BridgePort(port) + " yet (plugin loads with dsh)");
             }
             return ok;
         }
 
+        private int BridgePort(int port) { return port + 100; }
+
+        private void EnsureBridgeToken()
+        {
+            if (String.IsNullOrEmpty(_config.BridgeToken))
+            {
+                _config.BridgeToken = Guid.NewGuid().ToString("N");
+                _config.Save();
+                FileLog.Info("WslBackend: generated runtime bridge token");
+            }
+        }
+
         private bool StartSystemd(int port, string profile)
         {
-            if (!WslTools.EnsureSystemdFiles(_distro, profile, port))
+            if (!WslTools.EnsureSystemdFiles(_distro, profile, port, BridgePort(port), _config.BridgeToken))
             {
                 FileLog.Error("WslBackend.StartSystemd: failed to write unit files");
                 return false;
@@ -214,7 +235,8 @@ namespace DshWebManager
                 FileLog.Error("WslBackend.Start: failed to materialize wsl-start.sh in " + _distro);
                 return false;
             }
-            string cmd = "~/.dsh-webui/wsl-start.sh " + WslTools.BashQuote(profile) + " " + port;
+            string cmd = "~/.dsh-webui/wsl-start.sh " + WslTools.BashQuote(profile) + " " + port
+                + " " + BridgePort(port) + " " + WslTools.BashQuote(_config.BridgeToken);
             string logOut = Path.Combine(AppPaths.LogDir, "wsl-dsh.out.log");
             string logErr = Path.Combine(AppPaths.LogDir, "wsl-dsh.err.log");
             FileLog.Info("WslBackend: launching " + Describe() + " dsh on port " + port + " (profile " + profile + ")");
@@ -257,6 +279,17 @@ namespace DshWebManager
                 StopKeepalive();
                 _lastPort = 0;
                 return;
+            }
+            // Graceful shutdown first: ask the in-dsh runtime bridge to terminate
+            // cleanly, then fall back to the hard kill if it is not answering.
+            if (_lastPort > 0 && !String.IsNullOrEmpty(_config.BridgeToken))
+            {
+                string resp = WslTools.BridgeQuery(BridgePort(_lastPort), _config.BridgeToken, "shutdown", 2000);
+                if (resp != null)
+                {
+                    FileLog.Info("WslBackend: bridge shutdown requested (" + resp + ")");
+                    System.Threading.Thread.Sleep(1200); // give dsh a moment to exit
+                }
             }
             if (!String.IsNullOrEmpty(_distro))
             {
