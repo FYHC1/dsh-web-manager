@@ -120,7 +120,6 @@ namespace DshWebManager
             _menu.Items.Add(_statusItem);
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(new ToolStripMenuItem(MenuExit, null, delegate { _closing = true; _service.Exit(true); }));
-            _notify.ContextMenuStrip = _menu;
 
             _notify.MouseClick += OnMouseClick;
 
@@ -234,8 +233,13 @@ namespace DshWebManager
 
         private void OnMouseClick(object sender, MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left)
-                _service.OpenWindow();
+            if (e.Button == MouseButtons.Left) { _service.OpenWindow(); return; }
+            if (e.Button == MouseButtons.Right)
+            {
+                // Manual show anchored above the tray icon: when switching backend the
+                // menu height changes but the bottom edge stays put (top adjusts up).
+                _menu.Show(Cursor.Position, ToolStripDropDownDirection.AboveRight);
+            }
         }
 
         public void UpdateStatus(string text)

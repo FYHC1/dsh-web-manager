@@ -65,7 +65,7 @@ namespace DshWebManager
                     case InstanceState.Managed: return "运行中 (" + where + ", " + ActivePort + ")" + RuntimeSuffix();
                     case InstanceState.Attached: return "外部服务 (" + ActivePort + ")" + RuntimeSuffix();
                     case InstanceState.Starting: return "启动中…";
-                    case InstanceState.Stopped: return "未运行";
+                    case InstanceState.Stopped: return "未启动 · 未知版本";
                     case InstanceState.Error: return "错误: " + LastError;
                     default: return State.ToString();
                 }
