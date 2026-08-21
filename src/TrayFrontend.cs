@@ -276,9 +276,16 @@ namespace DshWebManager
             private readonly TextBox _port;
             private readonly ComboBox _backend;
             private readonly TextBox _wslPort;
-            private readonly TextBox _wslDistro;
+            private readonly ComboBox _wslDistro;
             private readonly ComboBox _mode;
             public InstanceConfig Result { get; private set; }
+
+            /// <summary>One selectable WSL distro entry ("" = auto-detect).</summary>
+            private sealed class DistroItem
+            {
+                public string Name;
+                public override string ToString() { return String.IsNullOrEmpty(Name) ? "(自动)" : Name; }
+            }
 
             public InstanceDialog(InstanceConfig existing)
             {
@@ -287,14 +294,14 @@ namespace DshWebManager
                 MaximizeBox = false;
                 MinimizeBox = false;
                 StartPosition = FormStartPosition.CenterScreen;
-                ClientSize = new Size(380, 320);
+                ClientSize = new Size(400, 360);
 
                 _id = new TextBox();
                 _profile = new TextBox();
                 _port = new TextBox();
                 _backend = new ComboBox();
                 _wslPort = new TextBox();
-                _wslDistro = new TextBox();
+                _wslDistro = new ComboBox();
                 _mode = new ComboBox();
 
                 _id.Text = existing == null ? "wsl2" : existing.Id;
@@ -303,13 +310,49 @@ namespace DshWebManager
                 _backend.Items.AddRange(new object[] { "windows", "wsl" });
                 _backend.SelectedIndex = existing != null && existing.IsWsl ? 1 : 0;
                 _wslPort.Text = existing == null ? "3080" : existing.WslPort.ToString();
-                _wslDistro.Text = existing == null ? String.Empty : existing.WslDistro;
                 _mode.Items.AddRange(new object[] { "wrapper", "systemd" });
                 _mode.SelectedIndex = existing != null && String.Equals(existing.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
 
+                // WSL distro: drop-down of real user distros (+ "(自动)" = auto-detect).
+                _wslDistro.DropDownStyle = ComboBoxStyle.DropDownList;
+                _wslDistro.Items.Add(new DistroItem());
+                int distroSelect = 0;
+                int distroIdx = 1;
+                try
+                {
+                    foreach (WslDistroState s in WslTools.DetectDistroStates())
+                    {
+                        if (!WslTools.IsUserWslDistro(s.Name)) continue;
+                        _wslDistro.Items.Add(new DistroItem { Name = s.Name });
+                        if (existing != null && String.Equals(existing.WslDistro, s.Name, StringComparison.OrdinalIgnoreCase))
+                            distroSelect = distroIdx;
+                        distroIdx++;
+                    }
+                }
+                catch { }
+                _wslDistro.SelectedIndex = distroSelect;
+
+                // Buttons: fixed size in a bottom panel. (A Dock=Fill button inside a
+                // TableLayoutPanel cell rendered invisibly on some DPI/theme setups.)
+                Button ok = new Button();
+                ok.Text = "确定";
+                ok.DialogResult = DialogResult.OK;
+                ok.Size = new Size(90, 32);
+                Button cancel = new Button();
+                cancel.Text = "取消";
+                cancel.DialogResult = DialogResult.Cancel;
+                cancel.Size = new Size(90, 32);
+                FlowLayoutPanel buttons = new FlowLayoutPanel();
+                buttons.FlowDirection = FlowDirection.RightToLeft;
+                buttons.Dock = DockStyle.Bottom;
+                buttons.Height = 48;
+                buttons.Padding = new Padding(0, 8, 12, 8);
+                buttons.Controls.Add(ok);
+                buttons.Controls.Add(cancel);
+
                 TableLayoutPanel table = new TableLayoutPanel();
                 table.ColumnCount = 2;
-                table.RowCount = 8;
+                table.RowCount = 7;
                 table.Dock = DockStyle.Fill;
                 table.Padding = new Padding(12);
                 table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
@@ -323,22 +366,9 @@ namespace DshWebManager
                 AddRow(table, 5, "WSL 发行版", _wslDistro);
                 AddRow(table, 6, "WSL 模式", _mode);
 
-                Button ok = new Button();
-                ok.Text = "确定";
-                ok.DialogResult = DialogResult.OK;
-                ok.Dock = DockStyle.Fill;
-                Button cancel = new Button();
-                cancel.Text = "取消";
-                cancel.DialogResult = DialogResult.Cancel;
-                cancel.Dock = DockStyle.Fill;
-                FlowLayoutPanel buttons = new FlowLayoutPanel();
-                buttons.FlowDirection = FlowDirection.RightToLeft;
-                buttons.Dock = DockStyle.Fill;
-                buttons.Controls.Add(ok);
-                buttons.Controls.Add(cancel);
-                table.Controls.Add(buttons, 1, 7);
+                Controls.Add(buttons);   // dock Bottom first
+                Controls.Add(table);     // Fill takes the remaining space
 
-                Controls.Add(table);
                 AcceptButton = ok;
                 CancelButton = cancel;
             }
@@ -383,7 +413,8 @@ namespace DshWebManager
                     Result.BackendType = _backend.SelectedItem == null ? "windows" : _backend.SelectedItem.ToString();
                     Result.Port = p;
                     Result.WslPort = wp;
-                    Result.WslDistro = _wslDistro.Text.Trim();
+                    DistroItem chosen = _wslDistro.SelectedItem as DistroItem;
+                    Result.WslDistro = chosen == null ? String.Empty : chosen.Name;
                     Result.WslServiceMode = _mode.SelectedItem == null ? "wrapper" : _mode.SelectedItem.ToString();
                 }
                 base.OnFormClosing(e);
