@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
+﻿﻿﻿﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
 
 > 本文件用途：会话压缩/恢复时读取，重建关键事实与未完成事项。
 > 最后更新：2026-08-21 v2.2 交付后
@@ -105,9 +105,14 @@
 2. wsl-bootstrap.sh 的「未安装→静默安装」分支真机演练（需临时移除 manager，谨慎）
    - （已修复的真实故障）发行版自动选择记忆：LastWslDistro=FedoraLinux 已持久化，
      FedoraLinux44 为不可用镜像发行版（勿选），用户 config 可显式 WslDistro=FedoraLinux
-3. v3.0 已全部交付（systemd 托管 + Runtime Bridge + 多实例 + 更新机制）；
-   遗留：Runtime Bridge 注入用户 web profile（node_modules + cordis.patch.yml insert，
-   重启 dsh 生效）；多实例配置示例见 config（Instances 数组）
+3. v3.0 已全部交付（systemd 托管 + Runtime Bridge + 多实例 + 更新机制）✅
+   - 用户 web profile 已注入 dsh-runtime-bridge（node_modules 物理拷贝 +
+     cordis.patch.yml insert），并移除旧 dsh-webui-installer（interop 刷错元凶）
+   - 用户 config 已切多实例：windows(3081) + wsl(3080, systemd)；WSL 3080 由
+     systemd unit 托管（dsh 2091），bridge 3180 生效（getStatus 验证通过）
+   - 红线：用户 Windows 3080 服务（28792）独立运行，未纳入 manager 实例、未触碰
+   - 已知限制：多实例 Tick 只管理第一个实例(3081)的窗口图标/尺寸；WSL 实例窗口
+     打开但未持续管理（待扩展）
 
 ## 仓库路径速查
 
