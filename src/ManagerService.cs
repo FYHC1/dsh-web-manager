@@ -39,6 +39,19 @@ namespace DshWebManager
             }
         }
 
+        /// <summary>Backend whose window opens when the manager starts ("windows" / "wsl").</summary>
+        public string DefaultBackend
+        {
+            get { return _config.DefaultBackend; }
+            set
+            {
+                if (String.Equals(value, _config.DefaultBackend, StringComparison.OrdinalIgnoreCase)) return;
+                _config.DefaultBackend = value;
+                _config.Save();
+                FileLog.Info("DefaultBackend -> " + value);
+            }
+        }
+
         /// <summary>Controller for the active backend (fallback: first instance).</summary>
         public InstanceController ActiveController
         {
@@ -75,7 +88,7 @@ namespace DshWebManager
             _config.Save();
             foreach (InstanceController c in _controllers) c.Start();
             if (String.Equals(action, "open", StringComparison.OrdinalIgnoreCase))
-                OpenWindow();
+                OpenDefaultBackendWindow();
             _timer.Change(0, 1000);
             // v3.0: throttled dsh update check in the background (24 h).
             ThreadPool.QueueUserWorkItem(_ => CheckForUpdates());
@@ -164,6 +177,23 @@ namespace DshWebManager
             try { c.Stop(false); } catch (Exception ex) { FileLog.Error("RemoveInstance stop failed: " + ex.Message); }
             try { EdgeWindow.CloseWindow(c.ActivePort); } catch { }
             var h = InstancesChanged; if (h != null) h();
+        }
+
+        /// <summary>Opens the window of the configured default-start backend.</summary>
+        public void OpenDefaultBackendWindow()
+        {
+            InstanceController c = GetControllerForBackend(_config.DefaultBackend);
+            if (c == null) return;
+            int index = _controllers.IndexOf(c);
+            OpenWindow(index >= 0 ? index : 0);
+        }
+
+        private InstanceController GetControllerForBackend(string backend)
+        {
+            foreach (InstanceController c in _controllers)
+                if (String.Equals(c.Backend.BackendType, backend, StringComparison.OrdinalIgnoreCase))
+                    return c;
+            return null;
         }
 
         public void OpenWindow()

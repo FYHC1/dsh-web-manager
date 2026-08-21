@@ -124,12 +124,18 @@ namespace DshWebManager
             try
             {
                 string needle = ":" + port;
+                // Only match windows whose user-data-dir carries the per-port suffix
+                // ("...-3081\""). Stale windows from the old shared profile would
+                // otherwise be "found" and restored instead of launching a real
+                // standalone app window.
+                string dataNeedle = "-" + port + "\"";
                 List<uint> pids = new List<uint>();
                 foreach (EdgeProcInfo info in GetEdgeProcesses())
                 {
                     if (info.CommandLine.IndexOf("--type=", StringComparison.OrdinalIgnoreCase) >= 0) continue;
                     if (info.CommandLine.IndexOf("--app=", StringComparison.OrdinalIgnoreCase) < 0) continue;
                     if (info.CommandLine.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    if (info.CommandLine.IndexOf(dataNeedle, StringComparison.OrdinalIgnoreCase) < 0) continue;
                     pids.Add(info.Pid);
                 }
                 foreach (uint pid in pids)

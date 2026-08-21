@@ -41,6 +41,7 @@ namespace DshWebManager
         public WindowConfig Window { get; set; }
         public string BackendType { get; set; }   // "windows" | "wsl" (v2.1)
         public string ActiveBackend { get; set; } // active backend for open/restart; remembered across restarts (v3.0)
+        public string DefaultBackend { get; set; } // backend whose window opens on manager start (v3.0)
         public int WslPort { get; set; }          // wsl backend port (v2.1, per-backend port memory)
         public string WslDistro { get; set; }     // pinned WSL distro; empty = auto (v2.1)
         public string WslServiceMode { get; set; } // "wrapper" | "systemd" (v3.0); systemd unavailable -> auto fallback to wrapper
@@ -110,6 +111,7 @@ namespace DshWebManager
             Window = new WindowConfig();
             BackendType = "windows";
             ActiveBackend = "windows";
+            DefaultBackend = "windows";
             WslPort = 3080;
             WslDistro = String.Empty;
             WslServiceMode = "wrapper";
@@ -137,6 +139,7 @@ namespace DshWebManager
                         if (loaded.Window == null) loaded.Window = new WindowConfig();
                         if (String.IsNullOrEmpty(loaded.BackendType)) loaded.BackendType = "windows";
                         if (String.IsNullOrEmpty(loaded.ActiveBackend)) loaded.ActiveBackend = "windows";
+                        if (String.IsNullOrEmpty(loaded.DefaultBackend)) loaded.DefaultBackend = "windows";
                         if (loaded.WslPort <= 0) loaded.WslPort = 3080;
                         if (loaded.WslDistro == null) loaded.WslDistro = String.Empty;
                         if (String.IsNullOrEmpty(loaded.WslServiceMode)) loaded.WslServiceMode = "wrapper";

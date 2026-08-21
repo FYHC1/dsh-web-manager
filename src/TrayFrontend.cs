@@ -17,6 +17,9 @@ namespace DshWebManager
         private readonly ToolStripMenuItem _modeMenu;
         private readonly ToolStripMenuItem _modeWrapperItem;
         private readonly ToolStripMenuItem _modeSystemdItem;
+        private readonly ToolStripMenuItem _defaultWindowsItem;
+        private readonly ToolStripMenuItem _defaultWslItem;
+        private readonly ToolStripMenuItem _defaultMenu;
         private readonly System.Collections.Generic.List<ToolStripMenuItem> _instanceItems =
             new System.Collections.Generic.List<ToolStripMenuItem>();
         private ToolStripMenuItem _instancesMenu;
@@ -39,6 +42,7 @@ namespace DshWebManager
         private static string MenuAddInstance = "\u6dfb\u52a0\u5b9e\u4f8b";       // 添加实例
         private static string MenuRemoveInstance = "\u5220\u9664\u5b9e\u4f8b";    // 删除实例
         private static string MenuCloseWindow = "\u5173\u95ed\u7a97\u53e3";        // 关闭窗口
+        private static string MenuDefaultBackend = "\u9ed8\u8ba4\u542f\u52a8\u540e\u7aef";  // 默认启动后端
         private static string Title = "dsh web manager";
 
         public TrayFrontend(ManagerService service)
@@ -96,6 +100,14 @@ namespace DshWebManager
             _modeMenu.DropDownItems.Add(_modeWrapperItem);
             _modeMenu.DropDownItems.Add(_modeSystemdItem);
 
+            _defaultWindowsItem = new ToolStripMenuItem(MenuBackendWindows);
+            _defaultWslItem = new ToolStripMenuItem(MenuBackendWsl);
+            _defaultWindowsItem.Click += delegate { _service.DefaultBackend = "windows"; RefreshBackendCheck(); };
+            _defaultWslItem.Click += delegate { _service.DefaultBackend = "wsl"; RefreshBackendCheck(); };
+            _defaultMenu = new ToolStripMenuItem(MenuDefaultBackend);
+            _defaultMenu.DropDownItems.Add(_defaultWindowsItem);
+            _defaultMenu.DropDownItems.Add(_defaultWslItem);
+
             RefreshBackendCheck();
 
             // v3.0 multi-instance: every instance gets its own submenu, plus add/remove.
@@ -111,6 +123,7 @@ namespace DshWebManager
             _menu.Items.Add(new ToolStripMenuItem(MenuRestart, null, delegate { _service.Restart(); }));
             _menu.Items.Add(_autoStartItem);
             _menu.Items.Add(_modeMenu);
+            _menu.Items.Add(_defaultMenu);
             _menu.Items.Add(_instancesMenu);
             ToolStripMenuItem checkItem = new ToolStripMenuItem(MenuCheckUpdate, null, delegate { _service.CheckForUpdates(); });
             ToolStripMenuItem updateItem = new ToolStripMenuItem(MenuUpdateDsh, null, delegate { _service.ApplyDshUpdate(); });
@@ -307,6 +320,9 @@ namespace DshWebManager
                     _btnWsl.ForeColor = wsl ? Color.White : Color.FromArgb(0x33, 0x33, 0x33);
                 }
                 if (_modeMenu != null) _modeMenu.Visible = wsl; // Windows 后端隐藏 WSL 服务模式
+                bool defWsl = String.Equals(_service.DefaultBackend, "wsl", StringComparison.OrdinalIgnoreCase);
+                if (_defaultWslItem != null) _defaultWslItem.Checked = defWsl;
+                if (_defaultWindowsItem != null) _defaultWindowsItem.Checked = !defWsl;
                 bool systemd = wsl
                     && String.Equals(_service.Config.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
                 if (_modeSystemdItem != null) _modeSystemdItem.Checked = systemd;
