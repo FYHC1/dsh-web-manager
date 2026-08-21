@@ -50,7 +50,9 @@ Copy-Item -LiteralPath (Join-Path $assets 'dsh-webui.svg') -Destination $distAss
 $distWsl = Join-Path $dist 'wsl'
 [System.IO.Directory]::CreateDirectory($distWsl) | Out-Null
 if (Test-Path -LiteralPath (Join-Path $projectRoot 'scripts\wsl')) {
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts\wsl\*.sh') -Destination $distWsl -Force
+    # -LiteralPath does not expand wildcards; enumerate explicitly.
+    Get-ChildItem -LiteralPath (Join-Path $projectRoot 'scripts\wsl') -Filter '*.sh' -File |
+        Copy-Item -Destination $distWsl -Force
 }
 foreach ($optional in @('docs', 'LICENSE', 'README.md')) {
     if (Test-Path -LiteralPath (Join-Path $projectRoot $optional)) {
