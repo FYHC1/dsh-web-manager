@@ -1,4 +1,4 @@
-﻿# dsh web manager
+﻿﻿# dsh web manager
 
 Windows 侧常驻托盘的 **DeepSeek Harness WebUI 管理器**：负责启动 dsh web、拉起 Edge 应用窗口、守护服务进程、常驻系统托盘，并接管窗口图标与窗口尺寸记忆。
 
@@ -93,8 +93,9 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 - **v2.2**：后端感知健康探测（forwarding 关闭时守护不误判）+ 窗口 URL 策略（不可达时提示
   而非打开打不开的窗口）+ Error/Starting 残留清理 + 可中断 sleep + 墙钟超时 ✅ 已交付，
   R–V 真机矩阵通过
-- **v3.0（进行中）**：systemd 托管（WslServiceMode + unit 生成 + 托盘/管道切换，W–Z 矩阵）✅
-  已交付；剩余：Runtime Bridge 插件（权威状态/优雅停止）、多实例（两端同开）、更新机制
+- **v3.0**：systemd 托管（W–Z 矩阵）+ Runtime Bridge 插件（权威状态/优雅停止，ping/
+  getStatus/getRuntimeInfo/shutdown 协议）+ 多实例（Instances 数组，Windows+WSL 同开）+
+  更新机制（24h 节流版本检查 + 托盘一键更新）✅ 已交付
 
 ## 许可
 

@@ -1,4 +1,4 @@
-﻿# v2.1 / v3.0 实现计划（dsh web manager）
+﻿﻿# v2.1 / v3.0 实现计划（dsh web manager）
 
 > 最终决策记录（截至 2026-08-21 会话）：
 > 语言 C#/.NET Framework 4.8 + WinForms；新仓库 FYHC1/dsh-web-manager 独立交付；
@@ -68,16 +68,24 @@
    - 遗留：`systemctl --user` 依赖登录会话的 user manager；无登录会话的发行版需
      `loginctl enable-linger`（记入交付说明）
 
-2. **多实例（Windows + WSL 两端同时配置运行）**
-   - `Instances` 数组：每实例独立端口/状态/生命周期（配置模型预留）
-   - 托盘多实例子菜单（每实例一组）
+2. **多实例（Windows + WSL 两端同时配置运行）** ✅ 已交付（2026-08-21）
+   - `Instances` 数组（InstanceConfig：profile/backend/port/wsl*/window/enabled）；
+     EffectiveInstances 回退 legacy 单实例字段（向后兼容）
+   - 托盘「实例」子菜单（每实例 打开窗口/重启/状态）；沙箱验证 Windows+WSL 同开
 
-3. **Runtime Bridge 插件（权威状态/优雅停止）**
-   - DSH 内注入 Cordis 补丁（plugins/ 目录已预留 cordis patch 结构）
-   - versioned JSON 协议：ping / getStatus / getRuntimeInfo / shutdown
-   - Windows 侧 named pipe；WSL 侧 loopback TCP + launch token
+3. **Runtime Bridge 插件（权威状态/优雅停止）** ✅ 已交付（2026-08-21）
+   - plugins/dsh-runtime-bridge（Cordis bundle 包：dsh.bundle.patch + cordis.patch.yml + lib/index.js）
+   - versioned line-JSON 协议：ping / getStatus / getRuntimeInfo / shutdown（SIGTERM 优雅停止），
+     token 校验；监听 WSL 内 127.0.0.1:<port+100>，manager 经 localhostForwarding 直连
+   - wsl-start.sh / wsl-systemd-start.sh 传 DSH_BRIDGE_* env；manager 启动传 token +
+     ping 验证 + Stop 先 bridge shutdown 再 kill 兜底
+   - 端到端验证：真实 dsh 加载插件 → 全协议通过
+   - 待办：注入用户 web profile（node_modules + cordis.patch.yml insert，重启 dsh 生效）
 
-4. **更新机制**：dsh 版本检查（24h 节流）、托盘提示、一键更新
+4. **更新机制** ✅ 已交付（2026-08-21）：UpdateChecker（npmmirror registry 最新版 +
+   dsh --version 当前版，LastVersionCheckUtc 24h 节流）；托盘「更新」子菜单
+   （检查更新 / 更新 dsh = npm install -g @deepseek-ai/dsh@latest --registry=npmmirror）；
+   启动后台节流检查，有新版 balloon 提示
 
 ## 里程碑顺序
 

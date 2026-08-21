@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
+﻿﻿﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
 
 > 本文件用途：会话压缩/恢复时读取，重建关键事实与未完成事项。
 > 最后更新：2026-08-21 v2.2 交付后
@@ -105,9 +105,9 @@
 2. wsl-bootstrap.sh 的「未安装→静默安装」分支真机演练（需临时移除 manager，谨慎）
    - （已修复的真实故障）发行版自动选择记忆：LastWslDistro=FedoraLinux 已持久化，
      FedoraLinux44 为不可用镜像发行版（勿选），用户 config 可显式 WslDistro=FedoraLinux
-3. v3.0 剩余：Runtime Bridge 插件（权威状态/优雅停止）、多实例（两端同开）、更新机制
-   （**systemd 托管代码层已交付**：本机 /etc/wsl.conf 已含 systemd=true，无需 wsl --shutdown；
-   托盘「WSL 服务模式 → systemd」即可启用）
+3. v3.0 已全部交付（systemd 托管 + Runtime Bridge + 多实例 + 更新机制）；
+   遗留：Runtime Bridge 注入用户 web profile（node_modules + cordis.patch.yml insert，
+   重启 dsh 生效）；多实例配置示例见 config（Instances 数组）
 
 ## 仓库路径速查
 
