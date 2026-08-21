@@ -186,6 +186,14 @@ namespace DshWebManager
             if (c == null) return;
             int index = _controllers.IndexOf(c);
             OpenWindow(index >= 0 ? index : 0);
+            // Only the default-start backend's window should remain: close stale
+            // app windows of the other instances so a restart does not resurrect them.
+            foreach (InstanceController other in _controllers)
+            {
+                if (other == c) continue;
+                try { EdgeWindow.CloseWindow(other.ActivePort); }
+                catch (Exception ex) { FileLog.Error("OpenDefaultBackendWindow close stale: " + ex.Message); }
+            }
         }
 
         private InstanceController GetControllerForBackend(string backend)
