@@ -202,8 +202,12 @@ namespace DshWebManager
         {
             try
             {
-                if (_statusItem != null) _statusItem.Text = MenuStatus + ": " + text;
-                _notify.Text = Title + " - " + text;
+                // Show the active instance's compact StatusText (with runtime summary)
+                // instead of the raw event message, so the tray stays short/consistent.
+                InstanceController active = _service.Controller;
+                string status = active == null ? text : active.StatusText;
+                if (_statusItem != null) _statusItem.Text = MenuStatus + ": " + status;
+                _notify.Text = Title + " - " + status;
                 RefreshBackendCheck();
                 for (int i = 0; i < _instanceItems.Count && i < _service.Controllers.Count; i++)
                 {
