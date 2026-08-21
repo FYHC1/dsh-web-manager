@@ -1,4 +1,4 @@
-﻿﻿# dsh web manager
+# dsh web manager
 
 Windows 侧常驻托盘的 **DeepSeek Harness WebUI 管理器**：负责启动 dsh web、拉起 Edge 应用窗口、守护服务进程、常驻系统托盘，并接管窗口图标与窗口尺寸记忆。
 
@@ -58,6 +58,59 @@ powershell -ExecutionPolicy Bypass -File scripts\Install.ps1
 测试沙箱：设置环境变量 `DSH_WEB_MANAGER_HOME=<目录>` 可把 config/日志/mutex/管道整体隔离，
 用于并行验证而不影响真实安装。
 
+## 多实例（v3.0）
+
+`config.json` 的 `Instances` 数组可同时托管多个独立实例（Windows 与 WSL 混用、不同端口）。
+数组留空则回退到传统单实例字段（`Port` / `WslPort` / `BackendType` 等）。
+
+```json
+{
+  "Instances": [
+    { "Id": "windows", "BackendType": "windows", "Port": 3081, "Profile": "web", "Enabled": true },
+    { "Id": "wsl", "BackendType": "wsl", "WslPort": 3080, "WslDistro": "FedoraLinux",
+      "WslServiceMode": "systemd", "Profile": "web", "Enabled": true }
+  ]
+}
+```
+
+每个实例独立管理：端口、窗口尺寸/位置、图标、崩溃守护、Runtime Bridge 状态。
+托盘「实例」菜单列出全部实例（打开窗口 / 重启服务 / 状态），并支持**添加实例**与**删除实例**
+（添加对话框可下拉选择 WSL 发行版，自动探测真实发行版，无需手填）。
+
+## Runtime Bridge（v3.0）
+
+dsh 内可注入运行时桥（`plugins/dsh-runtime-bridge`），管理器借此拿到 dsh 的**权威状态**
+（版本、node、运行时长、pid、端口）并做**优雅停止**（先 SIGTERM 再 kill），而不是只看端口猜测。
+
+协议（line-delimited JSON，监听 `127.0.0.1:<webPort+100>`）：
+`ping` / `getStatus` / `getRuntimeInfo` / `shutdown`，请求形如
+`{"v":1,"method":"getRuntimeInfo","token":"<BridgeToken>"}`。
+
+**注入步骤**（WSL 与 Windows 两侧 profile 各自执行一次）：
+
+1. 把 `plugins/dsh-runtime-bridge` 整个目录拷贝到 profile 的
+   `node_modules/dsh-runtime-bridge/`（WSL：`~/.dsh/profiles/<name>/`，
+   Windows：`C:\Users\<你>\.dsh\profiles\<name>\`）。
+2. 在该 profile 的 `cordis.patch.yml` 末尾追加：
+
+   ```yaml
+   - insert:
+       - id: dsh-runtime-bridge
+         name: 'dsh-runtime-bridge'
+   ```
+
+管理器启动 dsh 时会自动注入 `DSH_BRIDGE_PORT`（=port+100）、`DSH_BRIDGE_TOKEN`
+（config 的 `BridgeToken`，首次自动生成）、`DSH_PROFILE`、`DSH_WEB_PORT`。
+托盘状态随之显示 `运行中 (…) · dsh <版本> · node <版本> · 运行 <时长>`。
+
+## 更新机制（v3.0）
+
+托盘「更新」菜单：
+
+- **检查更新**：24 小时节流，经 npmmirror 查询 `@deepseek-ai/dsh` 最新版，与运行中 dsh 版本
+  （优先取 Runtime Bridge 的 `dshVersion`）比对，有新版才弹通知。
+- **更新 dsh**：一键 `npm install -g @deepseek-ai/dsh@latest`（走 npmmirror），完成后提示新版本号。
+
 ## 状态与配置
 
 `config.json` 关键字段（`%USERPROFILE%\.dsh-webui\config.json`）：
@@ -76,6 +129,10 @@ powershell -ExecutionPolicy Bypass -File scripts\Install.ps1
 | `WslServiceMode` | WSL 服务模式：`wrapper`（自愈脚本）/ `systemd`（unit） | `wrapper` |
 | `Profile` | dsh profile 名 | `web` |
 | `Window.Size` / `Window.Position` | 记忆的窗口尺寸与位置 | 空（Edge 默认） |
+| `Instances` | v3.0 多实例列表（Id/Profile/BackendType/Port/WslPort/WslDistro/WslServiceMode/Enabled）；空 = 单实例回退 | `null` |
+| `BridgeToken` | Runtime Bridge 共享密钥（首次自动生成） | `""` |
+| `LastWslDistro` | 记忆上次成功使用的 WSL 发行版 | `""` |
+| `LastVersionCheckUtc` / `LastKnownLatest` | 更新检查节流时间戳 / 已知最新版本 | `""` |
 
 ## 开发
 
@@ -96,6 +153,8 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 - **v3.0**：systemd 托管（W–Z 矩阵）+ Runtime Bridge 插件（权威状态/优雅停止，ping/
   getStatus/getRuntimeInfo/shutdown 协议）+ 多实例（Instances 数组，Windows+WSL 同开）+
   更新机制（24h 节流版本检查 + 托盘一键更新）✅ 已交付
+- **v3.0 P1–P2 增强**：Runtime Bridge 状态接入托盘（dsh/node 版本、运行时长显示；检查更新联动）+
+  Windows 侧 Runtime Bridge + 多实例「添加/删除实例」托盘 UI + FindAppWindow WMI 卡死修复 ✅ 已交付
 
 ## 许可
 

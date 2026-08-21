@@ -106,3 +106,43 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
   修复：`LastWslDistro` 记忆上次成功（managed/attached）的发行版，选择优先级
   配置 > 上次成功 > 运行中 > 唯一 > 默认 > 打分；通知文案区分"服务在跑但 forwarding 关"
   与"服务未就绪（查发行版/dsh）"。
+
+## v3.0 Runtime Bridge 矩阵（权威状态 + 优雅停止）— 2026-08-21 实测
+
+> 注入方式：把 `plugins/dsh-runtime-bridge`（package.json + cordis.patch.yml + lib/index.js）
+> 拷贝进 profile 的 `node_modules/dsh-runtime-bridge/`，并在 profile `cordis.patch.yml` 末尾
+> insert `{ id: dsh-runtime-bridge, name: 'dsh-runtime-bridge' }`（**WSL 与 Windows 两侧 profile 都做**）。
+> 管理器启动 dsh 时注入 `DSH_BRIDGE_PORT=<port+100>` / `DSH_BRIDGE_TOKEN` / `DSH_PROFILE` / `DSH_WEB_PORT`。
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| CC | WSL bridge 监听 | WSL 后端 3080 → 查询 3180 | ✅ `getStatus` 返回 `{"v":1,"ok":true,"status":{"running":true,"pid":...,"profile":"web","webPort":3080,"host":"127.0.0.1"}}` |
+| DD | WSL bridge 权威版本 | 查询 3180 `getRuntimeInfo` | ✅ `info.dshVersion`=0.1.0-rc.7、`node`、`platform:linux` 与 WSL 实际一致 |
+| EE | bridge 优雅停止 | 查询 3180 `shutdown` | ✅ 返回 `{ok:true,shuttingDown:true}` → dsh SIGTERM 退出（wrapper 模式 kill 前先优雅） |
+| FF | Windows bridge（P1-3） | Windows 后端 3081 → 查询 3181 | ✅ `getRuntimeInfo` 返回 `dshVersion:0.1.0-rc.7`、`node:v24.16.0`、`platform:win32`、`pid:33992` |
+| GG | 托盘版本显示（P1-2） | Tick 每 10s RefreshRuntime | ✅ 状态文本附加 `· dsh 0.1.0-rc.7 · node v24.16.0 · 运行 12m`；检查更新优先用 bridge 版本（不再 spawn wsl.exe） |
+
+## v3.0 多实例矩阵 — 2026-08-21 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| HH | 双实例同开 | `Instances=[windows:3081, wsl:3080(systemd)]` | ✅ Windows 3081=managed（bridge 3181）；WSL 3080 同时在线；各自独立生命周期 |
+| II | 每实例窗口管理 | 两个实例窗口分别缩放/移动 | ✅ 每个 `InstanceConfig.Window` 独立记忆尺寸/位置，Tick 逐实例捕获 |
+| JJ | 每实例图标 | 两个窗口 | ✅ `HandleInstanceWindow` 逐实例 `ApplyIconToWindow`，互不干扰 |
+| KK | 实例菜单 | 托盘「实例」子菜单 | ✅ 每个实例有打开/重启/状态子项（P2-2 后列出所有实例） |
+| LL | 添加实例（P2-2） | 托盘「实例 → 添加实例」 | 代码交付：对话框（Id/后端/Profile/端口/WSL 发行版下拉/WSL 模式）→ `AddInstance` 即时启动 |
+| MM | 删除实例（P2-2） | 托盘「实例 → 删除实例」 | 代码交付：下拉选择 → `RemoveInstance` 停止并移除；至少保留一个 |
+
+## v3.0 更新机制矩阵 — 2026-08-21 交付
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| NN | 版本检查 | 托盘「更新 → 检查更新」 | ✅ 24h 节流 + npmmirror `@deepseek-ai/dsh/latest` + 比对 bridge 当前版本，仅新版本弹通知 |
+| OO | 一键更新 | 托盘「更新 → 更新 dsh」 | ✅ `npm i -g @deepseek-ai/dsh@latest --registry=https://registry.npmmirror.com`，完成后提示新版本号 |
+
+## P2 修复矩阵 — 2026-08-21
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| PP | FindAppWindow 卡死（P2-1） | exit 时 `CloseWindow` 曾卡在 WMI（"调用已取消"） | ✅ msedge 进程快照缓存（TTL 2s）+ `EnumerationOptions.Timeout=3s` + 失败降级上次快照；exit 不再挂死 |
+| QQ | 添加实例对话框（P2-2） | 打开「添加实例」 | ✅ 修复确认按钮不可见（改为底部固定尺寸面板）+ WSL 发行版下拉（自动探测真实发行版） |
