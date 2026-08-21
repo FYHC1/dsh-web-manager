@@ -1,4 +1,4 @@
-﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
+﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
 
 > 本文件用途：会话压缩/恢复时读取，重建关键事实与未完成事项。
 > 最后更新：2026-08-21 v2.2 交付后
@@ -60,6 +60,20 @@
   命中 Windows interop 的 /mnt/c/nvm4w/nodejs/dsh）；forwarding 实际正常
 - 修复：`LastWslDistro` 记忆上次成功（managed/attached）的发行版，选择优先级
   配置 > 上次成功 > 运行中 > 唯一 > 默认 > 打分；通知文案区分"forwarding 关"与"服务未就绪"
+
+### 故障 3：user@1000 用户 systemd 实例频繁重启 → Failed to fetch (internal)
+- 现象：manager 托管期间 dsh web 窗口报 "Failed to fetch (internal)"，尝试使用无果
+- 根因：`user@1000` 用户 systemd 实例频繁重启（12:21–12:43 多次，journald
+  systemd[221]/[222]/[223] PID 变化），每次重启停止所有 --user unit →
+  dsh-web-3080 服务中断 → 前端请求失败。Linger=no 时用户实例生命周期绑定
+  登录会话，WSL 下不稳定（manager 的 wsl.exe 短暂连接/会话波动会触发回收）
+- 修复：
+  1. `loginctl enable-linger hgl`（Linger=yes，用户实例不依赖会话，WSL 重启后自动运行）
+  2. `WslBackend.IsWrapperAlive` systemd 模式改为探测 unit is-active：
+     unit 被停=wrapper 死 → controller 崩溃计数 → systemctl start 自动拉起
+     （此前恒 true 只无限等待自愈）；沙箱验证外部 systemctl stop → 自动重启成功
+- 备注：当前 3080 由用户终端手动 dsh（pid 530，13:13:44 起）提供，manager 处于
+  附着模式；回归 systemd 托管需先关掉终端 dsh
 
 ### 故障 2：WSL 冷启动 forwarding 时序竞态
 - 现象：修复后一段时间，manager 突弹"服务未就绪"/"forwarding 关闭"通知，窗口不可用；
