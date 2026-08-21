@@ -114,6 +114,14 @@ namespace DshWebManager
                     Balloon("dsh web manager", "实例 Id 已存在: " + inst.Id);
                     return;
                 }
+            // A port is exclusive across backends: no other instance may reuse it.
+            int newPort = inst.EffectivePort;
+            foreach (InstanceConfig e in _config.Instances)
+                if (e.EffectivePort == newPort)
+                {
+                    Balloon("dsh web manager", "端口 " + newPort + " 已被实例 " + e.Id + " 占用，请换一个端口");
+                    return;
+                }
             if (inst.Window == null) inst.Window = new WindowConfig();
             if (String.IsNullOrEmpty(inst.Profile)) inst.Profile = "web";
             if (String.IsNullOrEmpty(inst.WslServiceMode)) inst.WslServiceMode = "wrapper";

@@ -12,8 +12,9 @@ namespace DshWebManager
         private readonly ContextMenuStrip _menu;
         private readonly ToolStripMenuItem _statusItem;
         private readonly ToolStripMenuItem _autoStartItem;
-        private readonly ToolStripMenuItem _backendWindowsItem;
-        private readonly ToolStripMenuItem _backendWslItem;
+        private readonly Button _btnWindows;
+        private readonly Button _btnWsl;
+        private readonly ToolStripMenuItem _modeMenu;
         private readonly ToolStripMenuItem _modeWrapperItem;
         private readonly ToolStripMenuItem _modeSystemdItem;
         private readonly System.Collections.Generic.List<ToolStripMenuItem> _instanceItems =
@@ -56,18 +57,42 @@ namespace DshWebManager
             _autoStartItem.Checked = service.Config.AutoStart;
             _autoStartItem.Click += delegate { _service.ToggleAutoStart(); };
 
-            _backendWindowsItem = new ToolStripMenuItem(MenuBackendWindows);
-            _backendWslItem = new ToolStripMenuItem(MenuBackendWsl);
-            _backendWindowsItem.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); };
-            _backendWslItem.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); };
+            _btnWindows = new Button();
+            _btnWindows.Text = MenuBackendWindows;
+            _btnWindows.FlatStyle = FlatStyle.Flat;
+            _btnWindows.FlatAppearance.BorderSize = 0;
+            _btnWindows.Width = 96;
+            _btnWindows.Height = 30;
+            _btnWindows.Cursor = Cursors.Hand;
+            _btnWindows.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); };
+
+            _btnWsl = new Button();
+            _btnWsl.Text = MenuBackendWsl;
+            _btnWsl.FlatStyle = FlatStyle.Flat;
+            _btnWsl.FlatAppearance.BorderSize = 0;
+            _btnWsl.Width = 96;
+            _btnWsl.Height = 30;
+            _btnWsl.Cursor = Cursors.Hand;
+            _btnWsl.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); };
+
+            FlowLayoutPanel switcher = new FlowLayoutPanel();
+            switcher.FlowDirection = FlowDirection.LeftToRight;
+            switcher.WrapContents = false;
+            switcher.AutoSize = true;
+            switcher.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            switcher.Margin = new Padding(0);
+            switcher.Padding = new Padding(4, 3, 4, 3);
+            switcher.Controls.Add(_btnWindows);
+            switcher.Controls.Add(_btnWsl);
+            ToolStripControlHost switcherHost = new ToolStripControlHost(switcher);
 
             _modeWrapperItem = new ToolStripMenuItem(MenuWslModeWrapper);
             _modeSystemdItem = new ToolStripMenuItem(MenuWslModeSystemd);
             _modeWrapperItem.Click += delegate { _service.SetWslMode("wrapper"); };
             _modeSystemdItem.Click += delegate { _service.SetWslMode("systemd"); };
-            ToolStripMenuItem modeMenu = new ToolStripMenuItem(MenuWslMode);
-            modeMenu.DropDownItems.Add(_modeWrapperItem);
-            modeMenu.DropDownItems.Add(_modeSystemdItem);
+            _modeMenu = new ToolStripMenuItem(MenuWslMode);
+            _modeMenu.DropDownItems.Add(_modeWrapperItem);
+            _modeMenu.DropDownItems.Add(_modeSystemdItem);
 
             RefreshBackendCheck();
 
@@ -76,13 +101,14 @@ namespace DshWebManager
             RebuildInstanceMenu();
 
             _menu = new ContextMenuStrip();
-            _menu.Items.Add(_backendWindowsItem);   // 顶部: 激活 Windows 后端
-            _menu.Items.Add(_backendWslItem);        // 顶部: 激活 WSL 后端
+            _menu.Renderer = new ToolStripProfessionalRenderer(new TrayColorTable());
+            _menu.ShowImageMargin = false;
+            _menu.Items.Add(switcherHost);        // 顶部: 横向 Windows/WSL 切换按钮
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(new ToolStripMenuItem(MenuOpen, null, delegate { _service.OpenWindow(); }));
             _menu.Items.Add(new ToolStripMenuItem(MenuRestart, null, delegate { _service.Restart(); }));
             _menu.Items.Add(_autoStartItem);
-            _menu.Items.Add(modeMenu);
+            _menu.Items.Add(_modeMenu);
             _menu.Items.Add(_instancesMenu);
             ToolStripMenuItem checkItem = new ToolStripMenuItem(MenuCheckUpdate, null, delegate { _service.CheckForUpdates(); });
             ToolStripMenuItem updateItem = new ToolStripMenuItem(MenuUpdateDsh, null, delegate { _service.ApplyDshUpdate(); });
@@ -103,6 +129,20 @@ namespace DshWebManager
             _service.InstancesChanged += RebuildInstanceMenu;
 
             UpdateStatus(_service.Controller.StatusText);
+        }
+
+        /// <summary>Light menu theme: white background, blue selection, subtle separators.</summary>
+        private sealed class TrayColorTable : ProfessionalColorTable
+        {
+            public override Color ToolStripDropDownBackground { get { return Color.White; } }
+            public override Color MenuItemSelected { get { return Color.FromArgb(0xE8, 0xF0, 0xFE); } }
+            public override Color MenuItemBorder { get { return Color.FromArgb(0x2D, 0x7F, 0xFF); } }
+            public override Color MenuBorder { get { return Color.FromArgb(0xD0, 0xD0, 0xD0); } }
+            public override Color SeparatorDark { get { return Color.FromArgb(0xE0, 0xE0, 0xE0); } }
+            public override Color SeparatorLight { get { return Color.FromArgb(0xE0, 0xE0, 0xE0); } }
+            public override Color ImageMarginGradientBegin { get { return Color.White; } }
+            public override Color ImageMarginGradientMiddle { get { return Color.White; } }
+            public override Color ImageMarginGradientEnd { get { return Color.White; } }
         }
 
         private Icon LoadTrayIcon()
@@ -206,7 +246,11 @@ namespace DshWebManager
                 // instead of the raw event message, so the tray stays short/consistent.
                 InstanceController active = _service.Controller;
                 string status = active == null ? text : active.StatusText;
-                if (_statusItem != null) _statusItem.Text = MenuStatus + ": " + status;
+                string display = status;
+                int sep = display.IndexOf(" · ");
+                if (sep >= 0)
+                    display = display.Substring(0, sep) + Environment.NewLine + "  " + display.Substring(sep + 3);
+                if (_statusItem != null) _statusItem.Text = MenuStatus + ": " + display;
                 _notify.Text = Title + " - " + status;
                 RefreshBackendCheck();
                 for (int i = 0; i < _instanceItems.Count && i < _service.Controllers.Count; i++)
@@ -226,8 +270,19 @@ namespace DshWebManager
             try
             {
                 bool wsl = String.Equals(_service.ActiveBackend, "wsl", StringComparison.OrdinalIgnoreCase);
-                if (_backendWslItem != null) _backendWslItem.Checked = wsl;
-                if (_backendWindowsItem != null) _backendWindowsItem.Checked = !wsl;
+                Color active = Color.FromArgb(0x2D, 0x7F, 0xFF);
+                Color inactive = SystemColors.Control;
+                if (_btnWindows != null)
+                {
+                    _btnWindows.BackColor = wsl ? inactive : active;
+                    _btnWindows.ForeColor = wsl ? Color.FromArgb(0x33, 0x33, 0x33) : Color.White;
+                }
+                if (_btnWsl != null)
+                {
+                    _btnWsl.BackColor = wsl ? active : inactive;
+                    _btnWsl.ForeColor = wsl ? Color.White : Color.FromArgb(0x33, 0x33, 0x33);
+                }
+                if (_modeMenu != null) _modeMenu.Visible = wsl; // Windows 后端隐藏 WSL 服务模式
                 bool systemd = wsl
                     && String.Equals(_service.Config.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
                 if (_modeSystemdItem != null) _modeSystemdItem.Checked = systemd;
@@ -306,24 +361,27 @@ namespace DshWebManager
                 _wslDistro = new ComboBox();
                 _mode = new ComboBox();
 
-                // Default ports continue after the highest existing port of that backend.
-                int defWin = 3081, defWsl = 3080;
+                // Default ports: continue after the globally highest used port, so a
+                // new instance never collides with any existing one (either backend).
+                int maxUsed = 3079;
                 if (config != null)
                 {
                     if (config.Instances != null && config.Instances.Count > 0)
                     {
                         foreach (InstanceConfig inst in config.Instances)
                         {
-                            if (inst.IsWsl) { if (inst.WslPort >= defWsl) defWsl = inst.WslPort + 1; }
-                            else { if (inst.Port >= defWin) defWin = inst.Port + 1; }
+                            if (inst.Port > maxUsed) maxUsed = inst.Port;
+                            if (inst.WslPort > maxUsed) maxUsed = inst.WslPort;
                         }
                     }
                     else
                     {
-                        defWin = config.Port + 1;
-                        defWsl = config.WslPort + 1;
+                        if (config.Port > maxUsed) maxUsed = config.Port;
+                        if (config.WslPort > maxUsed) maxUsed = config.WslPort;
                     }
                 }
+                int defWin = maxUsed + 1;
+                int defWsl = maxUsed + 2;
 
                 _id.Text = existing == null ? "new" : existing.Id;
                 _profile.Text = existing == null ? "web" : existing.Profile;
