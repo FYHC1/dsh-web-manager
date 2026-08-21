@@ -1,4 +1,4 @@
-﻿# 验证矩阵（v2.0 + v2.1 真机实测记录）
+﻿﻿# 验证矩阵（v2.0 + v2.1 真机实测记录）
 
 测试机：Windows 11 22H2 + WSL2（FedoraLinux 运行中 / FedoraLinux44 默认但 Stopped）
 dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm/.../dsh`
@@ -94,3 +94,10 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 - **systemd unit 生成**：manager 物化 wsl-systemd-start.sh（前台 exec dsh）+ 写
   ~/.config/systemd/user/dsh-web-<port>.service（Type=simple / Restart=on-failure /
   journald 日志），文件写入不依赖 systemd 运行，可在启用前预置。
+- **真实故障（2026-08-21，已修复）**：用户关闭 WSL 后重启 manager，自动发行版选择在
+  无"运行中"候选时落到默认标记的 **FedoraLinux44**（不可用镜像发行版：`Failed to start
+  the systemd user session`、`command -v dsh` 命中 Windows interop 的 /mnt/c/nvm4w），
+  systemctl start 起不来 → 超时 → 误报 "localhostForwarding 关闭"。
+  修复：`LastWslDistro` 记忆上次成功（managed/attached）的发行版，选择优先级
+  配置 > 上次成功 > 运行中 > 唯一 > 默认 > 打分；通知文案区分"服务在跑但 forwarding 关"
+  与"服务未就绪（查发行版/dsh）"。
