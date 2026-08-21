@@ -36,7 +36,7 @@ namespace DshWebManager
         }
 
         /// <summary>Launches the Edge app window for the given URL with remembered size/position.</summary>
-        public static void Launch(ManagerConfig config, string url)
+        public static void Launch(ManagerConfig config, string url, int port)
         {
             string edge = FindEdgeExe();
             if (edge == null) throw new InvalidOperationException("Microsoft Edge was not found.");
@@ -45,9 +45,12 @@ namespace DshWebManager
             // merges the --app request into the default profile's running instance
             // (single-instance semantics), the app window never becomes a standalone
             // window, and the manager can neither find it nor set its taskbar icon.
+            // Each instance gets its own profile dir (suffixed by port) so multiple
+            // app windows never merge into one Edge/browser window.
             string dataDir = config.DataDir;
             if (String.IsNullOrEmpty(dataDir))
                 dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-web-manager-browser");
+            dataDir = dataDir + "-" + port;
             string args = "--app=" + url + " --user-data-dir=\"" + dataDir + "\"";
             if (!String.IsNullOrEmpty(config.Window.Size))
                 args += " --window-size=" + config.Window.Size;
@@ -159,7 +162,7 @@ namespace DshWebManager
                 Win32.SetForegroundWindow(h);
                 return;
             }
-            Launch(config, url);
+            Launch(config, url, port);
         }
 
         /// <summary>Closes the app window for the port (WM_CLOSE), if present.</summary>

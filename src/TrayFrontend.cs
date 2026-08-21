@@ -20,6 +20,7 @@ namespace DshWebManager
         private readonly System.Collections.Generic.List<ToolStripMenuItem> _instanceItems =
             new System.Collections.Generic.List<ToolStripMenuItem>();
         private ToolStripMenuItem _instancesMenu;
+        private int _menuFixedBottom = -1;
         private bool _closing;
 
         private static string MenuOpen = "\u6253\u5f00\u7a97\u53e3";            // 打开窗口
@@ -37,6 +38,7 @@ namespace DshWebManager
         private static string MenuUpdateDsh = "\u66f4\u65b0 dsh";                // 更新 dsh
         private static string MenuAddInstance = "\u6dfb\u52a0\u5b9e\u4f8b";       // 添加实例
         private static string MenuRemoveInstance = "\u5220\u9664\u5b9e\u4f8b";    // 删除实例
+        private static string MenuCloseWindow = "\u5173\u95ed\u7a97\u53e3";        // 关闭窗口
         private static string Title = "dsh web manager";
 
         public TrayFrontend(ManagerService service)
@@ -180,6 +182,17 @@ namespace DshWebManager
             catch (Exception ex) { FileLog.Error("RestartInstance window: " + ex.Message); }
         }
 
+        private void CloseInstanceWindow(int index)
+        {
+            InstanceController c = _service.GetController(index);
+            if (c == null) return;
+            try
+            {
+                EdgeWindow.CloseWindow(c.ActivePort);
+            }
+            catch (Exception ex) { FileLog.Error("CloseInstanceWindow: " + ex.Message); }
+        }
+
         /// <summary>Rebuilds the instance submenu from the live controller list (v3.0 P2-2).</summary>
         private void RebuildInstanceMenu()
         {
@@ -193,10 +206,12 @@ namespace DshWebManager
                 ToolStripMenuItem item = new ToolStripMenuItem(InstanceLabel(ic));
                 ToolStripMenuItem openItem = new ToolStripMenuItem(MenuOpen, null, delegate { _service.OpenWindow(idx); });
                 ToolStripMenuItem restartItem = new ToolStripMenuItem(MenuRestart, null, delegate { RestartInstance(idx); });
+                ToolStripMenuItem closeItem = new ToolStripMenuItem(MenuCloseWindow, null, delegate { CloseInstanceWindow(idx); });
                 ToolStripMenuItem statusItem = new ToolStripMenuItem(MenuStatus + ": " + ic.StatusText);
                 statusItem.Enabled = false;
                 item.DropDownItems.Add(openItem);
                 item.DropDownItems.Add(restartItem);
+                item.DropDownItems.Add(closeItem);
                 item.DropDownItems.Add(new ToolStripSeparator());
                 item.DropDownItems.Add(statusItem);
                 _instanceItems.Add(item);
@@ -236,9 +251,14 @@ namespace DshWebManager
             if (e.Button == MouseButtons.Left) { _service.OpenWindow(); return; }
             if (e.Button == MouseButtons.Right)
             {
-                // Manual show anchored above the tray icon: when switching backend the
-                // menu height changes but the bottom edge stays put (top adjusts up).
-                _menu.Show(Cursor.Position, ToolStripDropDownDirection.AboveRight);
+                // Manual show with a FIXED bottom edge (screen bottom): when switching
+                // backend the height changes and only the top moves.
+                Screen screen = Screen.FromPoint(Cursor.Position);
+                _menuFixedBottom = screen.WorkingArea.Bottom - 4;
+                Size sz = _menu.GetPreferredSize(Size.Empty);
+                int x = Cursor.Position.X - sz.Width; // right-align to the cursor
+                if (x < screen.WorkingArea.Left) x = screen.WorkingArea.Left;
+                _menu.Show(new Point(x, _menuFixedBottom - sz.Height));
             }
         }
 
@@ -262,8 +282,8 @@ namespace DshWebManager
                     ToolStripMenuItem item = _instanceItems[i];
                     InstanceController ic = _service.Controllers[i];
                     item.Text = InstanceLabel(ic);
-                    if (item.DropDownItems.Count >= 4)
-                        item.DropDownItems[3].Text = MenuStatus + ": " + ic.StatusText;
+                    if (item.DropDownItems.Count >= 5)
+                        item.DropDownItems[4].Text = MenuStatus + ": " + ic.StatusText;
                 }
             }
             catch { }
@@ -291,6 +311,12 @@ namespace DshWebManager
                     && String.Equals(_service.Config.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
                 if (_modeSystemdItem != null) _modeSystemdItem.Checked = systemd;
                 if (_modeWrapperItem != null) _modeWrapperItem.Checked = !systemd;
+                // Keep the menu's bottom edge fixed while it is open and its height changed.
+                if (_menu.Visible && _menuFixedBottom > 0)
+                {
+                    Size sz = _menu.GetPreferredSize(Size.Empty);
+                    _menu.Top = _menuFixedBottom - sz.Height;
+                }
             }
             catch { }
         }
