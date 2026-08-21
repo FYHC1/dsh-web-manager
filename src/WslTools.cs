@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -562,6 +562,19 @@ namespace DshWebManager
             // /run/systemd/system exists only when systemd is PID 1 (no shell metacharacters).
             CommandResult r = RunCapture(distro, "bash", new string[] { "-lc", "test -d /run/systemd/system && echo YES || echo NO" }, 10000);
             return r.ExitCode == 0 && (r.StandardOutput ?? String.Empty).Trim().Contains("YES");
+        }
+
+        /// <summary>True when the systemd user unit is currently active.</summary>
+        public static bool SystemctlIsActive(string distro, int port)
+        {
+            if (String.IsNullOrWhiteSpace(distro) || port <= 0) return false;
+            string uid = String.Empty;
+            CommandResult id = RunCapture(distro, "id", new string[] { "-u" }, 8000);
+            if (id.ExitCode == 0) uid = (id.StandardOutput ?? String.Empty).Trim();
+            string prefix = String.IsNullOrEmpty(uid) ? String.Empty : "XDG_RUNTIME_DIR=/run/user/" + uid + " ";
+            CommandResult r = RunCapture(distro, "bash",
+                new string[] { "-lc", prefix + "systemctl --user is-active dsh-web-" + port + ".service 2>/dev/null" }, 10000);
+            return r.ExitCode == 0 && (r.StandardOutput ?? String.Empty).Trim().Equals("active", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

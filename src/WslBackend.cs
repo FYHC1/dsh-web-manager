@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -199,7 +199,14 @@ namespace DshWebManager
 
         public bool IsWrapperAlive()
         {
-            if (_mode == WslServiceModeKind.Systemd) return true; // systemd heals; heartbeat waits instead of fighting
+            if (_mode == WslServiceModeKind.Systemd)
+            {
+                // The unit is "the wrapper": while it stays active systemd is healing
+                // the service; if the unit itself went away (e.g. the user systemd
+                // manager restarted and dropped it), report dead so the controller
+                // restarts it instead of waiting forever.
+                return WslTools.SystemctlIsActive(_distro, _lastPort);
+            }
             try { return _proc != null && !_proc.HasExited; }
             catch { return false; }
         }
