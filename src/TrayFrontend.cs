@@ -136,6 +136,8 @@ namespace DshWebManager
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(new ToolStripMenuItem(MenuExit, null, delegate { _closing = true; _service.Exit(true); }));
 
+            _notify.ContextMenuStrip = _menu;   // standard tray popup: click-outside closes, no extra taskbar buttons
+            _menu.Opening += OnMenuOpening;
             _notify.MouseClick += OnMouseClick;
 
             _service.StatusChanged += s => UpdateStatus(s);
@@ -266,18 +268,30 @@ namespace DshWebManager
 
         private void OnMouseClick(object sender, MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left) { _service.OpenWindow(); return; }
-            if (e.Button == MouseButtons.Right)
+            if (e.Button == MouseButtons.Left)
+                _service.OpenWindow();
+        }
+
+        /// <summary>After the standard tray popup appears, re-anchor it with a fixed
+        /// bottom edge (screen bottom) so backend switching only moves the top.</summary>
+        private void OnMenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            BeginInvoke(new Action(AnchorMenuBottom));
+        }
+
+        private void AnchorMenuBottom()
+        {
+            try
             {
-                // Manual show with a FIXED bottom edge (screen bottom): when switching
-                // backend the height changes and only the top moves.
+                if (!_menu.Visible) return;
                 Screen screen = Screen.FromPoint(Cursor.Position);
                 _menuFixedBottom = screen.WorkingArea.Bottom - 4;
                 Size sz = _menu.GetPreferredSize(Size.Empty);
                 int x = Cursor.Position.X - sz.Width; // right-align to the cursor
                 if (x < screen.WorkingArea.Left) x = screen.WorkingArea.Left;
-                _menu.Show(new Point(x, _menuFixedBottom - sz.Height));
+                _menu.Location = new Point(x, _menuFixedBottom - sz.Height);
             }
+            catch { }
         }
 
         public void UpdateStatus(string text)

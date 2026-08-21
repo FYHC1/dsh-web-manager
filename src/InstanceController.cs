@@ -41,6 +41,7 @@ namespace DshWebManager
         private int _missingCount;
         private DateTime _windowStart = DateTime.MinValue;
         private int _crashCount;
+        private DateTime _lastStopProbeUtc = DateTime.MinValue;
 
         public event Action<string> StatusChanged;
 
@@ -259,6 +260,25 @@ namespace DshWebManager
         {
             lock (_sync)
             {
+                if (State == InstanceState.Stopped)
+                {
+                    // An external dsh may still be serving (e.g. an attached instance was
+                    // detached by "close instance" but its process keeps running). Probe
+                    // periodically and re-attach so the tray reflects reality.
+                    if (DateTime.UtcNow.Subtract(_lastStopProbeUtc) < TimeSpan.FromSeconds(5)) return;
+                    _lastStopProbeUtc = DateTime.UtcNow;
+                    try
+                    {
+                        if (_backend.ProbePort(ActivePort) == PortProbeResult.DshServing)
+                        {
+                            State = InstanceState.Attached;
+                            RememberBackendDistro();
+                            FireStatus("已附着现有 dsh 服务 (" + _backend.Describe() + ", port " + ActivePort + ")");
+                        }
+                    }
+                    catch (Exception ex) { FileLog.Error("Tick stopped-probe: " + ex.Message); }
+                    return;
+                }
                 if (State != InstanceState.Managed && State != InstanceState.Attached) return;
                 bool up = _backend.IsServiceUp(ActivePort);
                 if (up)
