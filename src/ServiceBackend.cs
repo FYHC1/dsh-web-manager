@@ -26,6 +26,8 @@ namespace DshWebManager
         bool Start(int port, string profile);        // launch the service, returns success
         bool IsWrapperAlive();                       // the launched wrapper process still alive
         void Stop();                                 // stop the managed service (attached never touched)
+        bool IsServiceUp(int port);                  // backend-aware liveness (wait-ready + heartbeat)
+        string GetWindowUrl(int port);               // URL the Edge window opens (WSL IP when forwarding is off)
     }
 
     public static class BackendFactory
@@ -97,6 +99,16 @@ namespace DshWebManager
             int pid = ManagedPid;
             if (pid > 0) DshLauncher.KillTree(pid);
             _proc = null;
+        }
+
+        public bool IsServiceUp(int port)
+        {
+            return PortInspector.IsListening(port);
+        }
+
+        public string GetWindowUrl(int port)
+        {
+            return "http://127.0.0.1:" + port + "/";
         }
     }
 }

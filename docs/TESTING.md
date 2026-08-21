@@ -36,6 +36,16 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | P | WSL→Windows 互装 | `wsl-bootstrap.sh tray` | ✅ 探测到 manager 运行 → 转发动作；bootstrap.lock 先到先得并清理 |
 | Q | 沙箱隔离 | 全程对照真实 config/进程 | ✅ 真实 config.json 原封不动（Port 3080/windows/2.0.0）；真实 manager(24476)、3080(30556)、3081(20912) 全程无损 |
 
+## v2.2 矩阵（forwarding 感知 + 清理修复）— 2026-08-21 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| R | WSL 托管回归 | v2.2 构建 WSL 后端 3095 | ✅ 127.0.0.1 绑定（dsh 拒绝 0.0.0.0）、Windows 可达、URL=http://127.0.0.1:3095/、崩溃自愈、后端切换均正常 |
+| S | Error 状态清理 | 不存在的 profile 启动失败 → Error/Starting + 存活 wrapper → exit | ✅ `Stopping managed dsh` 触发后端清理；退避中的 wsl-start.sh 被 TERM 秒杀、无残留（修复前会残留 wrapper/脚本） |
+| T | 可中断 sleep | 脚本进入 60s 退避后发 TERM | ✅ `sleep_int`（后台 sleep + wait）使陷阱立即触发（修复前前台 sleep 60 延迟陷阱最多 60s） |
+| U | 墙钟超时 | WSL 后端启动失败等待超时 | ✅ WaitReadyBackend 改用墙钟截止（修复前按迭代计数，WSL 探测每轮 ~1.5s 导致实际超时 ~2min） |
+| V | dsh 安全限制 | `--host 0.0.0.0` | ✅ **dsh 主动拒绝**（"intentionally not supported yet for safety"，防 RCE 暴露）→ v2.2 放弃 0.0.0.0/WSL-IP 方案，forwarding 关闭时 GetWindowUrl 返回空串 + 托盘提示，不做无谓的 URL 回退 |
+
 ## 关键发现与修复（开发过程记录）
 
 - `dsh web` 是错误用法；正确语法为 `dsh --profile <profile> [--host 127.0.0.1] --port <port>`。
@@ -55,3 +65,11 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
   `.exe` 后缀 → 用 `Get-Process -Name 'dsh-web-manager*'`（剥离扩展名 + 通配符）。
 - WSL 发行版自动选择优先级：配置 > 唯一候选 > 运行中(唯一) > 默认 > 名称打分
   （若默认发行版处于 Stopped 而另有运行中的，选运行中的那个）。
+- **dsh 拒绝 `--host 0.0.0.0`**（安全设计防 RCE）→ WSL 服务只能绑 127.0.0.1，
+  依赖 localhostForwarding 供 Windows 访问；forwarding 关闭时管理器给出明确提示而非打开打不开的窗口。
+- **wsl.exe 透传 + bash 陷阱延迟**：前台 `sleep 60` 期间收到 TERM 会等 sleep 结束才执行陷阱
+  → 用 `sleep N & wait $!` 使陷阱立即触发。
+- **迭代计数超时陷阱**：等待就绪/崩溃检测若按"轮数×500ms"计时会因 WSL 探测耗时（wsl.exe 拉起 ~1.5s）
+  把实际超时拉长数倍 → 一律用墙钟截止。
+- **Error/Starting 状态的清理**：后端已拉起 wrapper 但启动失败（如 profile 不存在）时，
+  Stop/Exit 必须仍调用 backend.Stop() 清理 wsl.exe/脚本，否则残留进程继续空转。

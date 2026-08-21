@@ -512,12 +512,15 @@ namespace DshWebManager
         /// </summary>
         public const string WslStartScript =
 @"#!/usr/bin/env bash
-# dsh web manager v2.1 - WSL-side dsh web launcher (first-line self-heal).
+# dsh web manager v2.2 - WSL-side dsh web launcher (first-line self-heal).
 # Usage: wsl-start.sh <profile> <port>
+# dsh intentionally rejects --host 0.0.0.0 (RCE safety), so the service binds
+# 127.0.0.1 inside WSL; Windows reaches it through localhost forwarding.
 set -u
 
 PROFILE=""${1:-web}""
 PORT=""${2:-3080}""
+HOST=""127.0.0.1""
 DWM_DIR=""$HOME/.dsh-webui""
 PIDFILE=""$DWM_DIR/wsl-dsh.pid""
 LOG=""$DWM_DIR/wsl-dsh.log""
@@ -550,6 +553,11 @@ cleanup() {
 }
 trap cleanup TERM INT
 
+# Interruptible sleep: bash defers a trap until the current foreground command
+# completes, so `sleep 60` would delay TERM handling by up to 60 s. Running sleep
+# in the background and `wait`-ing makes the trap fire immediately.
+sleep_int() { sleep ""$1"" & wait ""$!"" 2>/dev/null; }
+
 log ""wsl-start.sh starting profile=$PROFILE port=$PORT (pid=$$)""
 
 if ! command -v dsh >/dev/null 2>&1; then
@@ -559,8 +567,8 @@ fi
 
 CRASHES=0
 while true; do
-  log ""launching dsh --profile $PROFILE --host 127.0.0.1 --port $PORT""
-  dsh --profile ""$PROFILE"" --host 127.0.0.1 --port ""$PORT"" >> ""$LOG"" 2>&1 &
+  log ""launching dsh --profile $PROFILE --host $HOST --port $PORT""
+  dsh --profile ""$PROFILE"" --host ""$HOST"" --port ""$PORT"" >> ""$LOG"" 2>&1 &
   DSH_PID=$!
   echo ""$DSH_PID"" > ""$PIDFILE""
   wait ""$DSH_PID""
@@ -571,14 +579,14 @@ while true; do
     CRASHES=$((CRASHES+1))
     if [ ""$CRASHES"" -ge 10 ]; then
       log ""10 consecutive failures, sleeping 60s""
-      sleep 60
+      sleep_int 60
       CRASHES=0
     else
-      sleep 3
+      sleep_int 3
     fi
   else
     CRASHES=0
-    sleep 2
+    sleep_int 2
   fi
 done
 ";

@@ -32,13 +32,12 @@ namespace DshWebManager
             return null;
         }
 
-        /// <summary>Launches the Edge app window for the given port with remembered size/position.</summary>
-        public static void Launch(ManagerConfig config, int port)
+        /// <summary>Launches the Edge app window for the given URL with remembered size/position.</summary>
+        public static void Launch(ManagerConfig config, string url)
         {
             string edge = FindEdgeExe();
             if (edge == null) throw new InvalidOperationException("Microsoft Edge was not found.");
 
-            string url = "http://127.0.0.1:" + port + "/";
             // A dedicated, isolated browser profile is REQUIRED: without it Edge
             // merges the --app request into the default profile's running instance
             // (single-instance semantics), the app window never becomes a standalone
@@ -106,7 +105,7 @@ namespace DshWebManager
         }
 
         /// <summary>Brings the app window to front, or launches a new one when absent.</summary>
-        public static void EnsureVisible(ManagerConfig config, int port)
+        public static void EnsureVisible(ManagerConfig config, string url, int port)
         {
             IntPtr h = FindAppWindow(port);
             if (h != IntPtr.Zero)
@@ -115,7 +114,7 @@ namespace DshWebManager
                 Win32.SetForegroundWindow(h);
                 return;
             }
-            Launch(config, port);
+            Launch(config, url);
         }
 
         /// <summary>Applies the DSH icon (32px taskbar big / 16px small) to the app window.</summary>

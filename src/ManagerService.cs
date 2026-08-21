@@ -60,15 +60,29 @@ namespace DshWebManager
                     try
                     {
                         _controller.Start(); // may block up to the startup timeout
-                        EdgeWindow.EnsureVisible(_config, _controller.ActivePort);
+                        OpenWindowCore();
                     }
                     catch (Exception ex) { FileLog.Error("OpenWindow(start) failed: " + ex.Message); }
                 });
                 return;
             }
+            OpenWindowCore();
+        }
+
+        private void OpenWindowCore()
+        {
+            string url = WindowUrl();
+            if (String.IsNullOrEmpty(url))
+            {
+                FileLog.Error("OpenWindow: no usable URL (WSL service not reachable from Windows)");
+                var b = Balloon;
+                if (b != null)
+                    b("dsh web manager", "WSL 服务在运行，但 localhostForwarding 关闭，Windows 无法访问；请开启 localhostForwarding 或在 WSL 内使用浏览器");
+                return;
+            }
             try
             {
-                EdgeWindow.EnsureVisible(_config, _controller.ActivePort);
+                EdgeWindow.EnsureVisible(_config, url, _controller.ActivePort);
                 _hadWindow = true;
             }
             catch (Exception ex)
@@ -76,6 +90,14 @@ namespace DshWebManager
                 FileLog.Error("OpenWindow failed: " + ex.Message);
                 var b = Balloon; if (b != null) b("dsh web manager", "打开窗口失败: " + ex.Message);
             }
+        }
+
+        /// <summary>Window URL for the active backend/port (empty = not reachable from Windows).</summary>
+        private string WindowUrl()
+        {
+            try { return _controller.Backend.GetWindowUrl(_controller.ActivePort); }
+            catch (Exception ex) { FileLog.Error("WindowUrl failed: " + ex.Message); }
+            return "http://127.0.0.1:" + _controller.ActivePort + "/";
         }
 
         public void Restart()

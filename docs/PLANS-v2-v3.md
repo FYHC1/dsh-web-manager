@@ -37,8 +37,22 @@
    WSL 侧脚本自带崩溃循环做第一道自愈（manager 检测到 wrapper 存活时等待自愈，不争抢）
 
 4. **端口策略** ✅：每模式独立端口记忆（Port / WslPort，顺延写回）；WSL 模式同样走
-   "非 dsh 占用自动顺延"（ss 解析 + 非 dsh 判定）；localhostForwarding 探测为关闭时的
-   WSL IP URL 回退（`hostname -I`）留待 v2.2（当前环境 localhostForwarding 正常）
+   "非 dsh 占用自动顺延"（ss 解析 + 非 dsh 判定）
+   - v2.2 调整：`localhostForwarding` 关闭时 **不做 WSL IP URL 回退** —— dsh 出于安全
+     拒绝 `--host 0.0.0.0`（RCE 防护），服务只能绑 127.0.0.1，forwarding 关闭时 Windows
+     本就不可达；管理器改为：健康探测走 WSL 侧 ss 回退（守护不误判）+ 打开窗口时给出明确提示。
+
+## v2.2：forwarding 感知 + 生命周期清理修复 ✅ 已交付（2026-08-21）
+
+1. **后端感知健康探测**：`IServiceBackend.IsServiceUp(port)` —— Windows 探测失败时
+   WSL 后端回退 `ss -tlnp` 解析（forwarding 关闭时守护/状态/等待就绪不误判）
+2. **窗口 URL 策略**：`IServiceBackend.GetWindowUrl(port)`；WSL 不可达时返回空串，
+   `OpenWindow` 弹提示（"localhostForwarding 关闭，Windows 无法访问"）而非打开打不开的窗口
+3. **生命周期清理修复**：Stop/Restart 在后端已拉起 wrapper 但启动失败（Error/Starting）
+   时仍调用 backend.Stop()，杜绝残留 wsl.exe/脚本空转
+4. **可中断 sleep**：wsl-start.sh 用 `sleep N & wait $!`，TERM 陷阱不再被前台 sleep 延迟
+5. **墙钟超时**：WaitReadyBackend 用墙钟截止（迭代计数会被 WSL 探测耗时拉长数倍）
+6. **wsl-bootstrap 安装分支**真机演练仍待做（需临时移除用户 manager，谨慎）
 
 ## v3.0：systemd 托管 + 多实例 + 更新机制
 

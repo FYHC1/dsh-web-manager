@@ -135,5 +135,31 @@ namespace DshWebManager
             if (pid > 0) DshLauncher.KillTree(pid);
             _proc = null;
         }
+
+        /// <summary>
+        /// Backend-aware liveness: the Windows probe works through localhost forwarding;
+        /// when forwarding is off, fall back to the WSL-side socket table.
+        /// </summary>
+        public bool IsServiceUp(int port)
+        {
+            if (PortInspector.IsListening(port)) return true;
+            if (String.IsNullOrEmpty(_distro)) return false;
+            return WslTools.WslPortOwnerPid(_distro, port) > 0;
+        }
+
+        /// <summary>
+        /// Window URL for the WSL service. dsh only binds 127.0.0.1 inside WSL
+        /// (0.0.0.0 is rejected for safety), so Windows can reach it only through
+        /// localhost forwarding; when that is off, no URL is usable from Windows
+        /// and an empty string is returned (the caller shows a hint instead of
+        /// opening a window that cannot load).
+        /// </summary>
+        public string GetWindowUrl(int port)
+        {
+            if (PortInspector.IsListening(port))
+                return "http://127.0.0.1:" + port + "/";
+            FileLog.Info("WslBackend: port " + port + " not reachable from Windows (localhost forwarding off?)");
+            return String.Empty;
+        }
     }
 }

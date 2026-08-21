@@ -141,7 +141,7 @@ namespace DshWebManager
                         FireStatus(LastError);
                         return;
                     }
-                    if (!PortInspector.WaitReady(ActivePort, WaitReadyMs))
+                    if (!WaitReadyBackend(ActivePort, WaitReadyMs))
                     {
                         State = InstanceState.Error;
                         LastError = "dsh web 启动超时 (port " + ActivePort + ")";
@@ -178,8 +178,13 @@ namespace DshWebManager
         {
             lock (_sync)
             {
-                if (State == InstanceState.Managed)
+                bool owned = State == InstanceState.Managed
+                    || State == InstanceState.Starting
+                    || State == InstanceState.Error;
+                if (owned && (_backend.IsWrapperAlive() || _backend.ManagedPid > 0))
                 {
+                    // Also cleans up a backend whose start failed part-way (Error/Starting):
+                    // a spawned wsl.exe / script must not outlive the manager.
                     FileLog.Info("Stopping managed dsh (" + _backend.Describe() + ")");
                     _backend.Stop();
                     State = InstanceState.Stopped;
@@ -199,13 +204,12 @@ namespace DshWebManager
             }
         }
 
-        /// <summary>Restarts: stop (if managed) then start again.</summary>
+        /// <summary>Restarts: stop (if owned) then start again.</summary>
         public void Restart()
         {
             lock (_sync)
             {
-                if (State == InstanceState.Managed) _backend.Stop();
-                State = InstanceState.Stopped;
+                Stop(true); // also cleans up a half-started backend (Error/Starting)
             }
             Start();
         }
@@ -216,7 +220,7 @@ namespace DshWebManager
             lock (_sync)
             {
                 if (State != InstanceState.Managed && State != InstanceState.Attached) return;
-                bool up = PortInspector.IsListening(ActivePort);
+                bool up = _backend.IsServiceUp(ActivePort);
                 if (up)
                 {
                     _missingCount = 0;
@@ -270,7 +274,7 @@ namespace DshWebManager
                         FireStatus(LastError);
                         return;
                     }
-                    if (PortInspector.WaitReady(ActivePort, WaitReadyMs))
+                    if (WaitReadyBackend(ActivePort, WaitReadyMs))
                     {
                         State = InstanceState.Managed;
                         LastStartedUtc = DateTime.UtcNow;
@@ -297,6 +301,20 @@ namespace DshWebManager
             FileLog.Info("Status: " + text);
             var h = StatusChanged;
             if (h != null) h(text);
+        }
+
+        /// <summary>Backend-aware readiness wait (WSL falls back to the distro socket table).</summary>
+        private bool WaitReadyBackend(int port, int timeoutMs)
+        {
+            // Wall-clock deadline: a backend probe may take >1 s (wsl.exe spawn),
+            // so an iteration counter would stretch the timeout far beyond intent.
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (_backend.IsServiceUp(port)) return true;
+                System.Threading.Thread.Sleep(500);
+            }
+            return false;
         }
     }
 }

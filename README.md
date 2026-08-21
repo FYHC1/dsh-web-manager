@@ -44,6 +44,9 @@ powershell -ExecutionPolicy Bypass -File scripts\Install.ps1
 - **所有权模型**：管理器拉起的 = managed（完整生命周期/守护/退避重启）；
   外部已在跑的 WSL dsh = attached（只监控，不抢不杀）
 - **端口策略**：每后端独立端口记忆（`Port` / `WslPort`），非 dsh 占用自动顺延并写回
+- **健康探测**：Windows 端口探测 + WSL 侧 `ss` 解析双通道 —— 即使 localhostForwarding
+  关闭，守护/状态也不误判（dsh 出于安全拒绝 `--host 0.0.0.0`，故服务只绑 127.0.0.1，
+  forwarding 关闭时 Windows 无法访问，打开窗口会给出明确提示）
 - **双向互装**：`wsl-bootstrap.sh`（WSL→Windows）检测 manager 未运行则静默拉起，
   未安装则经共享目录 `~/.dsh-webui/wsl-bootstrap/Install.ps1` 静默安装；
   安装器会把 WSL 伴侣脚本物化进默认发行版（bootstrap.lock 先到先得防竞态）
@@ -82,7 +85,9 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 - **v2.0**：Windows 后端全量——托盘、窗口、图标、尺寸、守护、配置、日志、迁移、A–I 验证
 - **v2.1**：WSL 后端（wsl-start.sh 自愈托管 + distro 自动探测 + attached/managed 所有权 +
   双向互装 bootstrap + 每后端端口记忆）✅ 已交付，J–Q 真机矩阵通过
-- **v2.2**：localhostForwarding 关闭时的 WSL IP URL 回退；WSL→Windows 安装分支真机演练
+- **v2.2**：后端感知健康探测（forwarding 关闭时守护不误判）+ 窗口 URL 策略（不可达时提示
+  而非打开打不开的窗口）+ Error/Starting 残留清理 + 可中断 sleep + 墙钟超时 ✅ 已交付，
+  R–V 真机矩阵通过
 - **v3.0**：Runtime Bridge 插件（权威状态/优雅停止）、多实例（两端同开）、更新机制、设置界面
 
 ## 许可
