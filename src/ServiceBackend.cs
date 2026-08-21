@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using System;
+﻿using System;
 using System.Diagnostics;
 
 namespace DshWebManager
@@ -28,6 +28,8 @@ namespace DshWebManager
         void Stop();                                 // stop the managed service (attached never touched)
         bool IsServiceUp(int port);                  // backend-aware liveness (wait-ready + heartbeat)
         string GetWindowUrl(int port);               // URL the Edge window opens (WSL IP when forwarding is off)
+        void RefreshRuntime(int port);               // throttled runtime-bridge refresh (no-op if none; v3.0)
+        string GetRuntimeSummary(int port);          // optional rich runtime status ("" = none; v3.0 bridge)
     }
 
     public static class BackendFactory
@@ -118,6 +120,16 @@ namespace DshWebManager
         public string GetWindowUrl(int port)
         {
             return "http://127.0.0.1:" + port + "/";
+        }
+
+        public void RefreshRuntime(int port)
+        {
+            // Windows has no runtime bridge yet (v3.0); nothing to refresh.
+        }
+
+        public string GetRuntimeSummary(int port)
+        {
+            return String.Empty; // Windows has no runtime bridge yet (v3.0)
         }
     }
 }

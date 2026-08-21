@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -29,6 +29,9 @@ namespace DshWebManager
         private string _distro = String.Empty;
         private WslServiceModeKind _mode = WslServiceModeKind.Wrapper;
         private int _lastPort;
+        private BridgeInfo _bridgeInfo;                 // cached runtime-bridge payload
+        private DateTime _bridgeInfoAt = DateTime.MinValue;
+        private static readonly TimeSpan BridgeInfoTtl = TimeSpan.FromSeconds(10);
 
         public WslBackend(ManagerConfig config)
             : this(config, config == null || config.EffectiveInstances == null || config.EffectiveInstances.Count == 0 ? null : config.EffectiveInstances[0])
@@ -339,6 +342,43 @@ namespace DshWebManager
                 return "http://127.0.0.1:" + port + "/";
             FileLog.Info("WslBackend: port " + port + " not reachable from Windows (localhost forwarding off?)");
             return String.Empty;
+        }
+
+        /// <summary>
+        /// Queries the runtime bridge once (no throttle) and caches the result.
+        /// Returns null when the bridge is not reachable or the token is unset.
+        /// </summary>
+        public BridgeInfo QueryBridgeInfo(int port)
+        {
+            if (port <= 0 || String.IsNullOrEmpty(_config.BridgeToken)) return null;
+            string statusJson = WslTools.BridgeQuery(BridgePort(port), _config.BridgeToken, "getStatus", 2500);
+            string runtimeJson = WslTools.BridgeQuery(BridgePort(port), _config.BridgeToken, "getRuntimeInfo", 2500);
+            if (statusJson == null || runtimeJson == null) return null;
+            BridgeInfo info = BridgeInfoParser.FromJson(statusJson, runtimeJson);
+            info.Reachable = true;
+            _bridgeInfo = info;
+            _bridgeInfoAt = DateTime.UtcNow;
+            return info;
+        }
+
+        /// <summary>Throttled bridge refresh for the periodic heart-beat tick.</summary>
+        public void RefreshRuntime(int port)
+        {
+            if (port <= 0 || String.IsNullOrEmpty(_config.BridgeToken)) return;
+            if (DateTime.UtcNow.Subtract(_bridgeInfoAt) < BridgeInfoTtl) return;
+            QueryBridgeInfo(port);
+        }
+
+        /// <summary>Rich runtime status from the cached bridge payload ("" when unknown).</summary>
+        public string GetRuntimeSummary(int port)
+        {
+            BridgeInfo info = _bridgeInfo;
+            if (info == null || !info.Reachable) return String.Empty;
+            StringBuilder sb = new StringBuilder();
+            if (!String.IsNullOrEmpty(info.DshVersion)) sb.Append("dsh ").Append(info.DshVersion);
+            if (!String.IsNullOrEmpty(info.Node)) { if (sb.Length > 0) sb.Append(" · "); sb.Append("node ").Append(info.Node); }
+            if (info.UptimeMs > 0) { if (sb.Length > 0) sb.Append(" · "); sb.Append("运行 ").Append(BridgeInfoParser.FormatUptime(info.UptimeMs)); }
+            return sb.ToString();
         }
     }
 }

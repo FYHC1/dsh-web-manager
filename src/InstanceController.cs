@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿using System;
+﻿using System;
 using System.Diagnostics;
 
 namespace DshWebManager
@@ -62,14 +62,42 @@ namespace DshWebManager
                 string where = BackendDescribe;
                 switch (State)
                 {
-                    case InstanceState.Managed: return "运行中 (" + where + ", port " + ActivePort + ")";
-                    case InstanceState.Attached: return "外部服务 (attached, port " + ActivePort + ")";
+                    case InstanceState.Managed: return "运行中 (" + where + ", port " + ActivePort + ")" + RuntimeSuffix();
+                    case InstanceState.Attached: return "外部服务 (attached, port " + ActivePort + ")" + RuntimeSuffix();
                     case InstanceState.Starting: return "启动中…";
                     case InstanceState.Stopped: return "未运行";
                     case InstanceState.Error: return "错误: " + LastError;
                     default: return State.ToString();
                 }
             }
+        }
+
+        /// <summary>Rich runtime summary from the backend (empty when unavailable).</summary>
+        public string RuntimeSummary { get { return _backend == null ? String.Empty : _backend.GetRuntimeSummary(ActivePort); } }
+
+        /// <summary>Periodic bridge refresh, throttled inside the backend.</summary>
+        public void RefreshRuntime()
+        {
+            lock (_sync)
+            {
+                if (_backend == null) return;
+                if (State != InstanceState.Managed && State != InstanceState.Attached) return;
+                try { _backend.RefreshRuntime(ActivePort); }
+                catch (Exception ex) { FileLog.Error("RefreshRuntime failed: " + ex.Message); }
+            }
+        }
+
+        /// <summary>Re-publishes StatusText without writing a log line (periodic refresh).</summary>
+        public void RefreshStatusDisplay()
+        {
+            var h = StatusChanged;
+            if (h != null) h(StatusText);
+        }
+
+        private string RuntimeSuffix()
+        {
+            string s = _backend == null ? String.Empty : _backend.GetRuntimeSummary(ActivePort);
+            return String.IsNullOrEmpty(s) ? String.Empty : " · " + s;
         }
 
         /// <summary>Rebuilds the backend after a backend-type config change.</summary>

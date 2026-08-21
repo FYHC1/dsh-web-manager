@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿using System;
 using System.Threading;
 using System.Collections.Generic;
 using System.Windows.Forms;
@@ -16,6 +16,7 @@ namespace DshWebManager
         private readonly System.Threading.Timer _timer;
         private readonly Dictionary<InstanceController, bool> _hadWindows = new Dictionary<InstanceController, bool>();
         private DateTime _lastSizeCapture = DateTime.MinValue;
+        private DateTime _lastRuntimeRefresh = DateTime.MinValue;
         private bool _disposed;
 
         public event Action<string> StatusChanged;   // UI thread marshaling is done by the frontend
@@ -186,17 +187,39 @@ namespace DshWebManager
                         FileLog.Info("CheckForUpdates: no WSL distro to check; skipping");
                         return;
                     }
-                    string latest = UpdateChecker.CheckThrottled(_config, distro);
+                    string current = TryGetBridgeDshVersion();
+                    string latest = UpdateChecker.CheckThrottled(_config, distro, current);
                     if (String.IsNullOrEmpty(latest)) return;
                     var b = Balloon;
                     if (b != null)
-                        b("dsh web manager", "发现 dsh 新版本 " + latest + "（当前 " + UpdateChecker.GetCurrentWslDshVersion(distro) + "）。可在托盘菜单「更新 dsh」一键更新。");
+                    {
+                        string cur = String.IsNullOrEmpty(current) ? UpdateChecker.GetCurrentWslDshVersion(distro) : current;
+                        b("dsh web manager", "发现 dsh 新版本 " + latest + "（当前 " + cur + "）。可在托盘菜单「更新 dsh」一键更新。");
+                    }
                 }
                 catch (Exception ex)
                 {
                     FileLog.Error("CheckForUpdates: " + ex.Message);
                 }
             });
+        }
+
+        /// <summary>Current dsh version from the first reachable WSL runtime bridge ("" if none).</summary>
+        private string TryGetBridgeDshVersion()
+        {
+            foreach (InstanceController c in _controllers)
+            {
+                WslBackend wsl = c.Backend as WslBackend;
+                if (wsl == null) continue;
+                try
+                {
+                    BridgeInfo info = wsl.QueryBridgeInfo(c.ActivePort);
+                    if (info != null && info.Reachable && !String.IsNullOrEmpty(info.DshVersion))
+                        return info.DshVersion;
+                }
+                catch (Exception ex) { FileLog.Error("TryGetBridgeDshVersion: " + ex.Message); }
+            }
+            return String.Empty;
         }
 
         /// <summary>One-click update of the WSL-side global dsh package.</summary>
@@ -371,6 +394,21 @@ namespace DshWebManager
                     _lastSizeCapture = DateTime.Now;
                     foreach (InstanceController c in _controllers)
                         EdgeWindow.CaptureSize(c.ActivePort, c.Instance.Window, delegate { _config.Save(); }, DateTime.Now);
+                }
+
+                // Runtime-bridge status every ~10 s; re-publish when the summary text
+                // actually changed (uptime ticks up ~once a minute) to keep tray fresh.
+                if (DateTime.Now.Subtract(_lastRuntimeRefresh).TotalSeconds >= 10)
+                {
+                    _lastRuntimeRefresh = DateTime.Now;
+                    foreach (InstanceController c in _controllers)
+                    {
+                        string before = c.RuntimeSummary;
+                        c.RefreshRuntime();
+                        string after = c.RuntimeSummary;
+                        if (!String.Equals(before, after))
+                            c.RefreshStatusDisplay();
+                    }
                 }
             }
             catch (Exception ex)

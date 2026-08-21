@@ -72,13 +72,20 @@ namespace DshWebManager
         /// </summary>
         public static string CheckThrottled(ManagerConfig config, string distro)
         {
+            return CheckThrottled(config, distro, String.Empty);
+        }
+
+        /// <summary>Overload accepting a caller-provided current version (e.g. from the
+        /// runtime bridge); falls back to a wsl.exe "dsh --version" call when empty.</summary>
+        public static string CheckThrottled(ManagerConfig config, string distro, string currentOverride)
+        {
             DateTime last;
             DateTime.TryParse(config.LastVersionCheckUtc, out last);
             if (DateTime.UtcNow.Subtract(last) < Throttle)
                 return String.Empty; // still throttled; keep the last known answer
 
             config.LastVersionCheckUtc = DateTime.UtcNow.ToString("o");
-            string current = GetCurrentWslDshVersion(distro);
+            string current = String.IsNullOrEmpty(currentOverride) ? GetCurrentWslDshVersion(distro) : currentOverride;
             string latest = GetLatestDshVersion();
             config.LastKnownLatest = latest;
             config.Save();
