@@ -13,7 +13,7 @@ namespace DshWebManager
 
     public sealed class ManagerConfig
     {
-        public int Port { get; set; }
+        public int Port { get; set; }             // windows backend port
         public bool AutoFallback { get; set; }
         public string DataDir { get; set; }
         public bool CloseStopsService { get; set; }
@@ -21,8 +21,23 @@ namespace DshWebManager
         public bool AutoStart { get; set; }
         public WindowConfig Window { get; set; }
         public string BackendType { get; set; }   // "windows" | "wsl" (v2.1)
+        public int WslPort { get; set; }          // wsl backend port (v2.1, per-backend port memory)
+        public string WslDistro { get; set; }     // pinned WSL distro; empty = auto (v2.1)
         public string Profile { get; set; }        // dsh profile name (default web)
         public string Version { get; set; }
+
+        public bool IsWsl
+        {
+            get { return String.Equals(BackendType, "wsl", StringComparison.OrdinalIgnoreCase); }
+        }
+
+        /// <summary>The port of the active backend (per-backend port memory).</summary>
+        public int EffectivePort { get { return IsWsl ? WslPort : Port; } }
+
+        public void SetEffectivePort(int value)
+        {
+            if (IsWsl) WslPort = value; else Port = value;
+        }
 
         public ManagerConfig()
         {
@@ -34,8 +49,10 @@ namespace DshWebManager
             AutoStart = false;
             Window = new WindowConfig();
             BackendType = "windows";
+            WslPort = 3080;
+            WslDistro = String.Empty;
             Profile = "web";
-            Version = "2.0.0";
+            Version = "2.1.0";
         }
 
         public static ManagerConfig Load()
@@ -52,7 +69,10 @@ namespace DshWebManager
                     {
                         if (loaded.Window == null) loaded.Window = new WindowConfig();
                         if (String.IsNullOrEmpty(loaded.BackendType)) loaded.BackendType = "windows";
+                        if (loaded.WslPort <= 0) loaded.WslPort = 3080;
+                        if (loaded.WslDistro == null) loaded.WslDistro = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
+                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "2.1.0";
                         return loaded;
                     }
                 }

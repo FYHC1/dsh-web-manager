@@ -10,7 +10,9 @@ namespace DshWebManager
         [STAThread]
         private static int Main(string[] args)
         {
-            string action = args.Length > 0 ? args[0].ToLowerInvariant() : "open";
+            // Join all args: a control action may contain a space (e.g. "backend wsl")
+            // and PowerShell-style launchers split it into separate arguments.
+            string action = args.Length > 0 ? String.Join(" ", args).ToLowerInvariant() : "open";
             AppPaths.EnsureDirectories();
             FileLog.Info("dsh web manager starting, action=" + action + ", exe=" + AppPaths.ExePath);
 
@@ -25,7 +27,7 @@ namespace DshWebManager
             };
 
             string sid = WindowsIdentity.GetCurrent() == null ? "default" : (WindowsIdentity.GetCurrent().User == null ? "default" : WindowsIdentity.GetCurrent().User.Value.Replace('-', '_'));
-            string mutexName = @"Local\DshWebManager-" + sid;
+            string mutexName = @"Local\DshWebManager-" + sid + AppPaths.InstanceSuffix;
             bool createdNew;
             using (Mutex mutex = new Mutex(true, mutexName, out createdNew))
             {

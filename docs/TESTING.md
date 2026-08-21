@@ -1,19 +1,40 @@
-﻿# 验证矩阵（v2.0 真机实测记录）
+# 验证矩阵（v2.0 + v2.1 真机实测记录）
 
-测试机：Windows 11 + WSL2 FedoraLinux44；dsh 命令 `C:\nvm4w\nodejs\dsh.cmd`
-测试端口：3093 / 3095（绝不用 3080 做破坏性实验）；用户 3080 服务（PID 25080）全程不动。
+测试机：Windows 11 22H2 + WSL2（FedoraLinux 运行中 / FedoraLinux44 默认但 Stopped）
+dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm/.../dsh`
+测试端口：3093 / 3095（绝不用 3080 做破坏性实验）
+红线：用户 Windows 3080 服务（PID 25080）、3081 服务/窗口（PID 20912）、
+用户 WSL 3080 服务（PID 30556）、正常 Edge（pid 11076）、真实 config 全程不动。
+
+## v2.0 矩阵（Windows 后端）
 
 | # | 场景 | 操作 | 结果 |
 |---|------|------|------|
-| A | 启动 | `dsh-web-manager.exe open` → 拉起 dsh web → 弹 Edge 窗口 | ✅ 服务监听；窗口图标 sha 与官方 ico 一致；窗口尺寸 945x1020 已保存 |
+| A | 启动 | `dsh-web-manager.exe open` → 拉起 dsh web → 弹 Edge 窗口 | ✅ 服务监听；窗口图标 sha 与官方 ico 一致；窗口尺寸已保存 |
 | B | 关窗常驻 | 关闭 app 窗口 | ✅ 服务存活（默认 closeStopsService=false） |
-| C | 托盘唤起 | 再次 `exe open`（单实例转发） | ✅ 新窗口重现（hwnd 变化）；管理器进程唯一 |
+| C | 托盘唤起 | 再次 `exe open`（单实例转发） | ✅ 新窗口重现；管理器进程唯一 |
 | D | 单实例 | 多次启动 | ✅ 恒为 1 个 dsh-web-manager 进程（Mutex + 命名管道转发） |
-| E | 崩溃守护 | 杀 managed node 进程 | ✅ `crash #1` 检测 → 自动重启（1/3 退避）→ 服务恢复 |
-| F | 外部附着 | 先起外部 3095 dsh web，再启动 manager | ✅ attached 识别（不抢占）；关窗与退出管理器均不杀外部服务 |
+| E | 崩溃守护 | 杀 managed node 进程 | ✅ crash #1 检测 → 自动重启（1/3 退避）→ 服务恢复 |
+| F | 外部附着 | 先起外部 3095 dsh web，再启动 manager | ✅ attached 识别（不抢占）；不杀外部服务 |
 | G | 退出停服 | `exe exit`（managed 模式） | ✅ 停服务、taskkill 树、端口释放 |
-| H | 关窗停服开关 | `closeStopsService=true` + 关窗 | ✅ 服务随窗口关闭而停止（可配置回默认常驻） |
+| H | 关窗停服开关 | closeStopsService=true + 关窗 | ✅ 服务随窗口关闭而停止 |
 | I | 3080 红线 | 全程监听 3080 | ✅ 用户服务与窗口全程不受影响 |
+
+## v2.1 矩阵（WSL 后端 + 互装 + 守护）— 2026-08-21 实测
+
+测试沙箱：`DSH_WEB_MANAGER_HOME=C:\Users\hgl\AppData\Local\Temp\dwm-sandbox`
+（隔离 config/日志/mutex/管道，与真实安装完全互不干扰）
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| J | WSL 托管启动 | 配置 BackendType=wsl, WslPort=3095, WslDistro="" → `open` | ✅ 自动选中运行中的 **FedoraLinux**（未选默认但 Stopped 的 FedoraLinux44）；wsl-start.sh 物化到 `~/.dsh-webui/`；dsh 在 WSL 内 3095 监听；Windows 经 localhost 转发可达；状态 Managed；Edge 窗口打开 |
+| K | WSL 崩溃自愈 | `kill -9 <dsh pid>` | ✅ wsl-start.sh 3 秒内重启（新 pid）；manager 日志 `wrapper alive; waiting for self-heal`（不误计崩溃、不与之争抢） |
+| L | 退出停 WSL 服务 | `exe exit` | ✅ TERM 陷阱 `received TERM, stopping dsh` → 脚本退出、pidfile 清除、3095 释放 |
+| M | WSL attach | 手动 `dsh web --port 3095` 后启动 manager | ✅ `已附着现有 dsh 服务 (WSL (FedoraLinux), port 3095)`；外部进程不杀、不起第二实例 |
+| N | Windows 回归 | BackendType=windows, Port=3093 | ✅ dsh.cmd 拉起、Managed、监听 3093 |
+| O | 后端热切换 | 运行中 `backend wsl`（控制管道） | ✅ 停 Windows 3093 → 切 WSL → 3095 启动，状态/窗口跟随 |
+| P | WSL→Windows 互装 | `wsl-bootstrap.sh tray` | ✅ 探测到 manager 运行 → 转发动作；bootstrap.lock 先到先得并清理 |
+| Q | 沙箱隔离 | 全程对照真实 config/进程 | ✅ 真实 config.json 原封不动（Port 3080/windows/2.0.0）；真实 manager(24476)、3080(30556)、3081(20912) 全程无损 |
 
 ## 关键发现与修复（开发过程记录）
 
@@ -25,3 +46,12 @@
   dsh web 完整启动验证通过（HTTP 200）。
 - 启动子进程用 `cmd /d /s /c ""dsh.cmd" args"` + 异步流捕获（重定向到文件在 UNC 工作目录下会失败）。
 - 二次实例经命名管道转发动作；`exit` 用 `Environment.Exit` 保证托盘进程必然终止。
+- **wsl.exe 参数透传会二次解析内联脚本**：含 `$(...)` / `$VAR` / `\(` 的 bash 内联命令会被
+  wsl.exe→sh 链损坏（sed 收到字面引号）。修复：`ss -tlnp` 纯参数输出 + C# 侧解析（零元字符）。
+  简单命令（pkill / mkdir / cp / wslpath）不受影响。
+- `Start-Process -ArgumentList 'backend wsl'` 会把带空格参数拆成两个 → Program.cs 需
+  `String.Join(" ", args)` 再转发，否则控制动作被截断为 `backend`（no-op）。
+- `tasklist.exe //FI` 在 WSL interop 下不被转换（报"无效参数"）；`Get-Process -Name` 不接受
+  `.exe` 后缀 → 用 `Get-Process -Name 'dsh-web-manager*'`（剥离扩展名 + 通配符）。
+- WSL 发行版自动选择优先级：配置 > 唯一候选 > 运行中(唯一) > 默认 > 名称打分
+  （若默认发行版处于 Stopped 而另有运行中的，选运行中的那个）。

@@ -7,13 +7,15 @@ namespace DshWebManager
     {
         Stopped,
         Starting,
-        Managed,   // this manager launched the dsh process
-        Attached,  // external dsh process already serving; we only manage the window
+        Managed,   // this manager launched the service (Windows or WSL)
+        Attached,  // external dsh service already serving; we only manage the window
         Error
     }
 
     /// <summary>
-    /// Lifecycle state machine for one dsh web service on one port.
+    /// Lifecycle state machine for one dsh web service on one port, on top of an
+    /// IServiceBackend (Windows or WSL). Managed services are stopped/restarted by
+    /// the manager; attached services are only monitored.
     /// </summary>
     public sealed class InstanceController
     {
@@ -24,12 +26,16 @@ namespace DshWebManager
 
         private readonly object _sync = new object();
         private readonly ManagerConfig _config;
+        private IServiceBackend _backend;
 
         public int ActivePort { get; private set; }
-        public int ManagedPid { get; private set; }
         public InstanceState State { get; private set; }
         public string LastError { get; private set; }
         public DateTime? LastStartedUtc { get; private set; }
+
+        public int ManagedPid { get { return _backend == null ? 0 : _backend.ManagedPid; } }
+        public string BackendDescribe { get { return _backend == null ? String.Empty : _backend.Describe(); } }
+        public IServiceBackend Backend { get { return _backend; } }
 
         private int _missingCount;
         private DateTime _windowStart = DateTime.MinValue;
@@ -41,16 +47,18 @@ namespace DshWebManager
         {
             _config = config;
             State = InstanceState.Stopped;
-            ActivePort = config.Port;
+            ActivePort = config.EffectivePort;
+            _backend = BackendFactory.Create(config);
         }
 
         public string StatusText
         {
             get
             {
+                string where = BackendDescribe;
                 switch (State)
                 {
-                    case InstanceState.Managed: return "运行中 (managed, port " + ActivePort + ")";
+                    case InstanceState.Managed: return "运行中 (" + where + ", port " + ActivePort + ")";
                     case InstanceState.Attached: return "外部服务 (attached, port " + ActivePort + ")";
                     case InstanceState.Starting: return "启动中…";
                     case InstanceState.Stopped: return "未运行";
@@ -60,28 +68,52 @@ namespace DshWebManager
             }
         }
 
+        /// <summary>Rebuilds the backend after a backend-type config change.</summary>
+        public void Reconfigure()
+        {
+            lock (_sync)
+            {
+                _backend = BackendFactory.Create(_config);
+                ActivePort = _config.EffectivePort;
+                State = InstanceState.Stopped;
+                LastError = null;
+                _missingCount = 0;
+                _crashCount = 0;
+                FireStatus("已切换后端: " + BackendDescribe);
+            }
+        }
+
         /// <summary>Starts (or attaches to) dsh web on the configured/fallback port.</summary>
         public void Start()
         {
             lock (_sync)
             {
                 if (State == InstanceState.Starting || State == InstanceState.Managed) return;
-                int preferred = _config.Port;
-                int pid = PortInspector.GetListenerPid(preferred);
+                string error;
+                if (!_backend.IsAvailable(out error))
+                {
+                    State = InstanceState.Error;
+                    LastError = error;
+                    FireStatus(LastError);
+                    return;
+                }
 
-                if (pid > 0 && PortInspector.IsDshProcess(pid))
+                int preferred = _config.EffectivePort;
+                PortProbeResult probe = _backend.ProbePort(preferred);
+
+                if (probe == PortProbeResult.DshServing)
                 {
                     // Existing dsh already serving the preferred port: attach, never kill it.
                     ActivePort = preferred;
                     State = InstanceState.Attached;
                     LastStartedUtc = null;
-                    FireStatus("已附着现有 dsh 服务 (port " + preferred + ")");
+                    FireStatus("已附着现有 dsh 服务 (" + _backend.Describe() + ", port " + preferred + ")");
                     return;
                 }
 
-                if (PortInspector.IsListening(preferred))
+                if (probe == PortProbeResult.Occupied)
                 {
-                    int chosen = PortInspector.ChoosePort(preferred, _config.AutoFallback, true);
+                    int chosen = FindFreePort(preferred);
                     if (chosen <= 0)
                     {
                         State = InstanceState.Error;
@@ -90,6 +122,8 @@ namespace DshWebManager
                         return;
                     }
                     ActivePort = chosen;
+                    _config.SetEffectivePort(chosen);
+                    _config.Save();
                     FireStatus("端口 " + preferred + " 被占用，顺延至 " + chosen);
                 }
                 else
@@ -100,8 +134,13 @@ namespace DshWebManager
                 State = InstanceState.Starting;
                 try
                 {
-                    Process p = DshLauncher.StartDshWeb(ActivePort, _config.Profile);
-                    ManagedPid = p.Id;
+                    if (!_backend.Start(ActivePort, _config.Profile))
+                    {
+                        State = InstanceState.Error;
+                        LastError = "后端启动失败 (" + _backend.Describe() + ")";
+                        FireStatus(LastError);
+                        return;
+                    }
                     if (!PortInspector.WaitReady(ActivePort, WaitReadyMs))
                     {
                         State = InstanceState.Error;
@@ -113,7 +152,7 @@ namespace DshWebManager
                     LastStartedUtc = DateTime.UtcNow;
                     _crashCount = 0;
                     _windowStart = DateTime.UtcNow;
-                    FireStatus("dsh web 已启动 (port " + ActivePort + ")");
+                    FireStatus("dsh web 已启动 (" + _backend.Describe() + ", port " + ActivePort + ")");
                 }
                 catch (Exception ex)
                 {
@@ -124,16 +163,25 @@ namespace DshWebManager
             }
         }
 
-        /// <summary>Stops the managed dsh process (attached services are left alone).</summary>
+        private int FindFreePort(int preferred)
+        {
+            if (!_config.AutoFallback) return -1;
+            for (int p = preferred + 1; p < preferred + 100; p++)
+            {
+                if (_backend.ProbePort(p) == PortProbeResult.Free) return p;
+            }
+            return -1;
+        }
+
+        /// <summary>Stops the managed service (attached services are left alone).</summary>
         public void Stop(bool force)
         {
             lock (_sync)
             {
-                if (State == InstanceState.Managed && ManagedPid > 0)
+                if (State == InstanceState.Managed)
                 {
-                    FileLog.Info("Stopping managed dsh (pid=" + ManagedPid + ")");
-                    DshLauncher.KillTree(ManagedPid);
-                    ManagedPid = 0;
+                    FileLog.Info("Stopping managed dsh (" + _backend.Describe() + ")");
+                    _backend.Stop();
                     State = InstanceState.Stopped;
                     FireStatus("服务已停止");
                 }
@@ -156,9 +204,7 @@ namespace DshWebManager
         {
             lock (_sync)
             {
-                if (State == InstanceState.Managed && ManagedPid > 0)
-                    DshLauncher.KillTree(ManagedPid);
-                ManagedPid = 0;
+                if (State == InstanceState.Managed) _backend.Stop();
                 State = InstanceState.Stopped;
             }
             Start();
@@ -188,8 +234,17 @@ namespace DshWebManager
                     return;
                 }
 
-                // Managed service crashed: restart with back-off.
                 _missingCount = 0;
+
+                // WSL: the launcher script self-heals (restart loop). While its wrapper
+                // is alive the port may be briefly down; wait instead of fighting it.
+                if (_backend.IsWrapperAlive())
+                {
+                    FileLog.Info("Managed service down on port " + ActivePort + " but wrapper alive; waiting for self-heal");
+                    return;
+                }
+
+                // Managed service crashed (wrapper gone): restart with back-off.
                 DateTime now = DateTime.UtcNow;
                 if (now.Subtract(_windowStart) > TimeSpan.FromMilliseconds(CrashWindowMs))
                 {
@@ -206,11 +261,15 @@ namespace DshWebManager
                     return;
                 }
                 FireStatus("检测到服务停止，自动重启 (" + _crashCount + "/" + CrashLimit + ")");
-                ManagedPid = 0;
                 try
                 {
-                    Process p = DshLauncher.StartDshWeb(ActivePort, _config.Profile);
-                    ManagedPid = p.Id;
+                    if (!_backend.Start(ActivePort, _config.Profile))
+                    {
+                        State = InstanceState.Error;
+                        LastError = "自动重启失败 (" + _backend.Describe() + ")";
+                        FireStatus(LastError);
+                        return;
+                    }
                     if (PortInspector.WaitReady(ActivePort, WaitReadyMs))
                     {
                         State = InstanceState.Managed;

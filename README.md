@@ -32,7 +32,24 @@ powershell -ExecutionPolicy Bypass -File scripts\Install.ps1
 4. 常驻托盘：关窗不结束服务，点托盘/菜单「打开窗口」随时重新唤起
 5. 心跳循环：端口健康、图标维持（`WM_SETICON` 32/16px）、窗口尺寸采集、崩溃检测与退避重启
 
-托盘右键菜单：打开窗口 / 重启服务 / 退出（停服务）/ 开机自启 / 状态。
+托盘右键菜单：打开窗口 / 重启服务 / 后端（Windows 本机 ⇄ WSL）/ 退出（停服务）/ 开机自启 / 状态。
+
+## WSL 后端（v2.1）
+
+菜单「后端 → WSL」或 `dsh-web-manager.exe "backend wsl"` 即可把 dsh web 托管进 WSL：
+
+- **wsl-start.sh**：WSL 侧自愈启动器（物化到 `~/.dsh-webui/`），自带崩溃循环 + pidfile + TERM 陷阱
+- **发行版自动探测**：`wsl --list` 过滤辅助发行版（Docker/Rancher/Podman），
+  优先级：配置 `wslDistro` > 唯一候选 > 运行中 > 默认 > 名称打分
+- **所有权模型**：管理器拉起的 = managed（完整生命周期/守护/退避重启）；
+  外部已在跑的 WSL dsh = attached（只监控，不抢不杀）
+- **端口策略**：每后端独立端口记忆（`Port` / `WslPort`），非 dsh 占用自动顺延并写回
+- **双向互装**：`wsl-bootstrap.sh`（WSL→Windows）检测 manager 未运行则静默拉起，
+  未安装则经共享目录 `~/.dsh-webui/wsl-bootstrap/Install.ps1` 静默安装；
+  安装器会把 WSL 伴侣脚本物化进默认发行版（bootstrap.lock 先到先得防竞态）
+
+测试沙箱：设置环境变量 `DSH_WEB_MANAGER_HOME=<目录>` 可把 config/日志/mutex/管道整体隔离，
+用于并行验证而不影响真实安装。
 
 ## 状态与配置
 
@@ -40,13 +57,17 @@ powershell -ExecutionPolicy Bypass -File scripts\Install.ps1
 
 | 字段 | 说明 | 默认 |
 | --- | --- | --- |
-| `port` | 首选端口 | `3080` |
-| `autoFallback` | 非 dsh 占用时自动顺延空闲端口 | `true` |
-| `dataDir` | Edge 独立浏览器数据目录（留空用默认） | `""` |
-| `closeStopsService` | 关闭窗口时同时停止服务（旧行为开关） | `false` |
-| `exitKeepService` | 退出托盘时保留服务 | `false` |
-| `autoStart` | 开机自启（托盘不弹窗） | `false` |
-| `window.size` / `window.position` | 记忆的窗口尺寸与位置 | 空（Edge 默认） |
+| `Port` | Windows 后端首选端口 | `3080` |
+| `AutoFallback` | 非 dsh 占用时自动顺延空闲端口 | `true` |
+| `DataDir` | Edge 独立浏览器数据目录（留空用默认） | `""` |
+| `CloseStopsService` | 关闭窗口时同时停止服务（旧行为开关） | `false` |
+| `ExitKeepService` | 退出托盘时保留服务 | `false` |
+| `AutoStart` | 开机自启（托盘不弹窗） | `false` |
+| `BackendType` | `windows` / `wsl` | `windows` |
+| `WslPort` | WSL 后端首选端口 | `3080` |
+| `WslDistro` | 指定 WSL 发行版（留空自动） | `""` |
+| `Profile` | dsh profile 名 | `web` |
+| `Window.Size` / `Window.Position` | 记忆的窗口尺寸与位置 | 空（Edge 默认） |
 
 ## 开发
 
@@ -58,8 +79,10 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 
 ## 里程碑
 
-- **v2.0**：Windows 后端全量（本目录当前代码）——托盘、窗口、图标、尺寸、守护、配置、日志、迁移、A–I 验证
-- **v2.1**：WSL 后端（`wsl.exe` exec 语义托管 WSL 内 dsh web + distro 自动探测 + attached/managed 所有权 + 双向互装）
+- **v2.0**：Windows 后端全量——托盘、窗口、图标、尺寸、守护、配置、日志、迁移、A–I 验证
+- **v2.1**：WSL 后端（wsl-start.sh 自愈托管 + distro 自动探测 + attached/managed 所有权 +
+  双向互装 bootstrap + 每后端端口记忆）✅ 已交付，J–Q 真机矩阵通过
+- **v2.2**：localhostForwarding 关闭时的 WSL IP URL 回退；WSL→Windows 安装分支真机演练
 - **v3.0**：Runtime Bridge 插件（权威状态/优雅停止）、多实例（两端同开）、更新机制、设置界面
 
 ## 许可

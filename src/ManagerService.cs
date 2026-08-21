@@ -23,6 +23,7 @@ namespace DshWebManager
         public InstanceController Controller { get { return _controller; } }
         public ManagerConfig Config { get { return _config; } }
         public InstanceState State { get { return _controller.State; } }
+        public IServiceBackend Backend { get { return _controller.Backend; } }
 
         public ManagerService(ManagerConfig config)
         {
@@ -81,6 +82,28 @@ namespace DshWebManager
         {
             _controller.Restart();
             OpenWindowAfterDelay();
+        }
+
+        /// <summary>Switches the service backend (windows/wsl) and restarts the instance.</summary>
+        public void SetBackend(string type)
+        {
+            if (!String.Equals(type, "windows", StringComparison.OrdinalIgnoreCase)
+                && !String.Equals(type, "wsl", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (String.Equals(type, _config.BackendType, StringComparison.OrdinalIgnoreCase))
+            {
+                Balloon("dsh web manager", "后端已是 " + type);
+                return;
+            }
+            bool hadWindow = EdgeWindow.FindAppWindow(_controller.ActivePort) != IntPtr.Zero;
+            try { _controller.Stop(true); }
+            catch (Exception ex) { FileLog.Error("SetBackend stop failed: " + ex.Message); }
+            _config.BackendType = type.ToLowerInvariant();
+            _config.Save();
+            _controller.Reconfigure();
+            _controller.Start();
+            if (hadWindow) OpenWindowAfterDelay();
+            Balloon("dsh web manager", "已切换到 " + _controller.BackendDescribe + " 后端");
         }
 
         private void OpenWindowAfterDelay()

@@ -46,6 +46,12 @@ if ($LASTEXITCODE -ne 0) { throw "Application compilation failed with exit code 
 Copy-Item -LiteralPath (Join-Path $projectRoot 'config.example.json') -Destination $dist -Force
 Copy-Item -LiteralPath (Join-Path $assets 'dsh-webui.ico') -Destination $distAssets -Force
 Copy-Item -LiteralPath (Join-Path $assets 'dsh-webui.svg') -Destination $distAssets -Force
+# v2.1: WSL-side companion scripts (wsl-start.sh self-heal launcher, wsl-bootstrap.sh mutual bootstrap).
+$distWsl = Join-Path $dist 'wsl'
+[System.IO.Directory]::CreateDirectory($distWsl) | Out-Null
+if (Test-Path -LiteralPath (Join-Path $projectRoot 'scripts\wsl')) {
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts\wsl\*.sh') -Destination $distWsl -Force
+}
 foreach ($optional in @('docs', 'LICENSE', 'README.md')) {
     if (Test-Path -LiteralPath (Join-Path $projectRoot $optional)) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $optional) -Destination $dist -Recurse -Force

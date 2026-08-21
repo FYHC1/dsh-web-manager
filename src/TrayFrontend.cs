@@ -12,6 +12,8 @@ namespace DshWebManager
         private readonly ContextMenuStrip _menu;
         private readonly ToolStripMenuItem _statusItem;
         private readonly ToolStripMenuItem _autoStartItem;
+        private readonly ToolStripMenuItem _backendWindowsItem;
+        private readonly ToolStripMenuItem _backendWslItem;
         private bool _closing;
 
         private static string MenuOpen = "\u6253\u5f00\u7a97\u53e3";            // 打开窗口
@@ -19,6 +21,9 @@ namespace DshWebManager
         private static string MenuAutoStart = "\u5f00\u673a\u81ea\u542f";      // 开机自启
         private static string MenuExit = "\u9000\u51fa";                       // 退出
         private static string MenuStatus = "\u72b6\u6001";                     // 状态
+        private static string MenuBackend = "\u540e\u7aef";                    // 后端
+        private static string MenuBackendWindows = "Windows \u672c\u673a";     // Windows 本机
+        private static string MenuBackendWsl = "WSL";
         private static string Title = "dsh web manager";
 
         public TrayFrontend(ManagerService service)
@@ -39,10 +44,20 @@ namespace DshWebManager
             _autoStartItem.Checked = service.Config.AutoStart;
             _autoStartItem.Click += delegate { _service.ToggleAutoStart(); };
 
+            _backendWindowsItem = new ToolStripMenuItem(MenuBackendWindows);
+            _backendWslItem = new ToolStripMenuItem(MenuBackendWsl);
+            _backendWindowsItem.Click += delegate { _service.SetBackend("windows"); };
+            _backendWslItem.Click += delegate { _service.SetBackend("wsl"); };
+            ToolStripMenuItem backendMenu = new ToolStripMenuItem(MenuBackend);
+            backendMenu.DropDownItems.Add(_backendWindowsItem);
+            backendMenu.DropDownItems.Add(_backendWslItem);
+            RefreshBackendCheck();
+
             _menu = new ContextMenuStrip();
             _menu.Items.Add(new ToolStripMenuItem(MenuOpen, null, delegate { _service.OpenWindow(); }));
             _menu.Items.Add(new ToolStripMenuItem(MenuRestart, null, delegate { _service.Restart(); }));
             _menu.Items.Add(_autoStartItem);
+            _menu.Items.Add(backendMenu);
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(_statusItem);
             _menu.Items.Add(new ToolStripSeparator());
@@ -86,6 +101,18 @@ namespace DshWebManager
             {
                 if (_statusItem != null) _statusItem.Text = MenuStatus + ": " + text;
                 _notify.Text = Title + " - " + text;
+                RefreshBackendCheck();
+            }
+            catch { }
+        }
+
+        private void RefreshBackendCheck()
+        {
+            try
+            {
+                bool wsl = _service.Config.IsWsl;
+                if (_backendWslItem != null) _backendWslItem.Checked = wsl;
+                if (_backendWindowsItem != null) _backendWindowsItem.Checked = !wsl;
             }
             catch { }
         }

@@ -1,0 +1,2 @@
+# WSL-side scripts must stay LF even when checked out on Windows.
+scripts/wsl/*.sh text eol=lf

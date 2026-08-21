@@ -20,7 +20,7 @@ namespace DshWebManager
                 string sid = WindowsIdentity.GetCurrent().User == null
                     ? "default"
                     : WindowsIdentity.GetCurrent().User.Value.Replace('-', '_');
-                return @"\\.\pipe\dsh-web-manager-" + sid;
+                return @"\\.\pipe\dsh-web-manager-" + sid + AppPaths.InstanceSuffix;
             }
         }
 
@@ -115,6 +115,8 @@ namespace DshWebManager
                     _service.Exit(false);
                 else if (action.Equals("restart", StringComparison.OrdinalIgnoreCase))
                     _service.Restart();
+                else if (action.StartsWith("backend ", StringComparison.OrdinalIgnoreCase))
+                    _service.SetBackend(action.Substring("backend ".Length).Trim());
             }
             catch (Exception ex)
             {
