@@ -30,6 +30,7 @@ namespace DshWebManager
         string GetWindowUrl(int port);               // URL the Edge window opens (WSL IP when forwarding is off)
         void RefreshRuntime(int port);               // throttled runtime-bridge refresh (no-op if none; v3.0)
         string GetRuntimeSummary(int port);          // optional rich runtime status ("" = none; v3.0 bridge)
+        BridgeInfo QueryBridgeInfo(int port);        // forced bridge query + cache (null = unreachable; v3.0)
     }
 
     public static class BackendFactory
@@ -54,6 +55,10 @@ namespace DshWebManager
     {
         private readonly ManagerConfig _config;
         private Process _proc;
+        private int _lastPort;
+        private BridgeInfo _bridgeInfo;                 // cached runtime-bridge payload
+        private DateTime _bridgeInfoAt = DateTime.MinValue;
+        private static readonly TimeSpan BridgeInfoTtl = TimeSpan.FromSeconds(10);
 
         public WindowsBackend(ManagerConfig config) { _config = config; }
 
@@ -95,7 +100,9 @@ namespace DshWebManager
 
         public bool Start(int port, string profile)
         {
-            _proc = DshLauncher.StartDshWeb(port, profile);
+            _config.EnsureBridgeToken();
+            _lastPort = port;
+            _proc = DshLauncher.StartDshWeb(port, profile, _config.BridgeToken);
             return _proc != null;
         }
 
@@ -107,6 +114,14 @@ namespace DshWebManager
 
         public void Stop()
         {
+            // Graceful shutdown first: ask the in-dsh runtime bridge to terminate
+            // cleanly, then fall back to the hard kill if it is not answering.
+            string resp = RuntimeBridgeClient.Shutdown(_lastPort, _config.BridgeToken);
+            if (resp != null)
+            {
+                FileLog.Info("WindowsBackend: bridge shutdown requested (" + resp + ")");
+                System.Threading.Thread.Sleep(1200); // give dsh a moment to exit
+            }
             int pid = ManagedPid;
             if (pid > 0) DshLauncher.KillTree(pid);
             _proc = null;
@@ -124,12 +139,27 @@ namespace DshWebManager
 
         public void RefreshRuntime(int port)
         {
-            // Windows has no runtime bridge yet (v3.0); nothing to refresh.
+            if (port <= 0 || String.IsNullOrEmpty(_config.BridgeToken)) return;
+            if (DateTime.UtcNow.Subtract(_bridgeInfoAt) < BridgeInfoTtl) return;
+            QueryBridgeInfo(port);
         }
 
         public string GetRuntimeSummary(int port)
         {
-            return String.Empty; // Windows has no runtime bridge yet (v3.0)
+            return _bridgeInfo == null ? String.Empty : _bridgeInfo.Summary;
+        }
+
+        /// <summary>
+        /// Queries the runtime bridge once (no throttle) and caches the result.
+        /// Returns null when the bridge is not reachable or the token is unset.
+        /// </summary>
+        public BridgeInfo QueryBridgeInfo(int port)
+        {
+            BridgeInfo info = RuntimeBridgeClient.Query(port, _config.BridgeToken);
+            if (info == null) return null;
+            _bridgeInfo = info;
+            _bridgeInfoAt = DateTime.UtcNow;
+            return info;
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Web.Script.Serialization;
@@ -167,6 +167,15 @@ namespace DshWebManager
             {
                 FileLog.Error("Failed to write config: " + ex.Message);
             }
+        }
+
+        /// <summary>Generates the shared runtime-bridge token once and persists it.</summary>
+        public void EnsureBridgeToken()
+        {
+            if (!String.IsNullOrEmpty(BridgeToken)) return;
+            BridgeToken = Guid.NewGuid().ToString("N");
+            Save();
+            FileLog.Info("ManagerConfig: generated runtime bridge token");
         }
 
         /// <summary>Migrates the legacy v1.x "window-size" file ("W,H" lines) into Window.Size.</summary>

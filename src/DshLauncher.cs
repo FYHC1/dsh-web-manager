@@ -53,7 +53,7 @@ namespace DshWebManager
         /// Output is captured via async stream reading into the manager log dir.
         /// Returns the cmd.exe wrapper process (the real node process is a child).
         /// </summary>
-        public static Process StartDshWeb(int port, string profile)
+        public static Process StartDshWeb(int port, string profile, string bridgeToken)
         {
             string dsh = FindDshCommand();
             if (dsh == null) throw new InvalidOperationException("dsh command not found. Install dsh and update PATH.");
@@ -73,6 +73,17 @@ namespace DshWebManager
             psi.WorkingDirectory = AppPaths.InstallRoot;
             psi.RedirectStandardOutput = true;
             psi.RedirectStandardError = true;
+
+            // v3.0 runtime bridge: the in-dsh plugin listens on port+100 and reports
+            // authoritative status (dsh version, node, uptime) + graceful shutdown.
+            if (!String.IsNullOrEmpty(bridgeToken))
+            {
+                psi.EnvironmentVariables["DSH_BRIDGE_PORT"] = (port + 100).ToString();
+                psi.EnvironmentVariables["DSH_BRIDGE_TOKEN"] = bridgeToken;
+            }
+            psi.EnvironmentVariables["DSH_PROFILE"] = profile;
+            psi.EnvironmentVariables["DSH_WEB_PORT"] = port.ToString();
+            psi.EnvironmentVariables["DSH_WEB_HOST"] = "127.0.0.1";
 
             Process p = new Process();
             p.StartInfo = psi;

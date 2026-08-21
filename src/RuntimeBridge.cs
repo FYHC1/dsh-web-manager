@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Web.Script.Serialization;
 
 namespace DshWebManager
@@ -26,6 +27,20 @@ namespace DshWebManager
             DshVersion = String.Empty;
             Node = String.Empty;
             Hostname = String.Empty;
+        }
+
+        /// <summary>Human-friendly one-line summary, e.g. "dsh 0.1.0-rc.7 · node v24.19.0 · 运行 12m".</summary>
+        public string Summary
+        {
+            get
+            {
+                if (!Reachable) return String.Empty;
+                StringBuilder sb = new StringBuilder();
+                if (!String.IsNullOrEmpty(DshVersion)) sb.Append("dsh ").Append(DshVersion);
+                if (!String.IsNullOrEmpty(Node)) { if (sb.Length > 0) sb.Append(" · "); sb.Append("node ").Append(Node); }
+                if (UptimeMs > 0) { if (sb.Length > 0) sb.Append(" · "); sb.Append("运行 ").Append(BridgeInfoParser.FormatUptime(UptimeMs)); }
+                return sb.ToString();
+            }
         }
     }
 
@@ -119,6 +134,34 @@ namespace DshWebManager
         {
             long l = GetLong(d, key);
             return l > int.MaxValue ? int.MaxValue : (l < int.MinValue ? int.MinValue : (int)l);
+        }
+    }
+
+    /// <summary>
+    /// Shared runtime-bridge client for both Windows and WSL backends. The bridge
+    /// listens on 127.0.0.1:&lt;webPort + 100&gt;; from Windows the WSL bridge is reached
+    /// through localhost forwarding, so the TCP address is identical either way.
+    /// Returns null when the bridge is not reachable or the token is unset.
+    /// </summary>
+    public static class RuntimeBridgeClient
+    {
+        public static BridgeInfo Query(int port, string token)
+        {
+            if (port <= 0 || String.IsNullOrEmpty(token)) return null;
+            int bridgePort = port + 100;
+            string statusJson = WslTools.BridgeQuery(bridgePort, token, "getStatus", 2500);
+            string runtimeJson = WslTools.BridgeQuery(bridgePort, token, "getRuntimeInfo", 2500);
+            if (statusJson == null || runtimeJson == null) return null;
+            BridgeInfo info = BridgeInfoParser.FromJson(statusJson, runtimeJson);
+            info.Reachable = true;
+            return info;
+        }
+
+        /// <summary>Asks the in-dsh bridge to shut down gracefully; returns the raw response or null.</summary>
+        public static string Shutdown(int port, string token)
+        {
+            if (port <= 0 || String.IsNullOrEmpty(token)) return null;
+            return WslTools.BridgeQuery(port + 100, token, "shutdown", 2000);
         }
     }
 }

@@ -177,12 +177,7 @@ namespace DshWebManager
 
         private void EnsureBridgeToken()
         {
-            if (String.IsNullOrEmpty(_config.BridgeToken))
-            {
-                _config.BridgeToken = Guid.NewGuid().ToString("N");
-                _config.Save();
-                FileLog.Info("WslBackend: generated runtime bridge token");
-            }
+            _config.EnsureBridgeToken();
         }
 
         private bool StartSystemd(int port, string profile)
@@ -350,12 +345,8 @@ namespace DshWebManager
         /// </summary>
         public BridgeInfo QueryBridgeInfo(int port)
         {
-            if (port <= 0 || String.IsNullOrEmpty(_config.BridgeToken)) return null;
-            string statusJson = WslTools.BridgeQuery(BridgePort(port), _config.BridgeToken, "getStatus", 2500);
-            string runtimeJson = WslTools.BridgeQuery(BridgePort(port), _config.BridgeToken, "getRuntimeInfo", 2500);
-            if (statusJson == null || runtimeJson == null) return null;
-            BridgeInfo info = BridgeInfoParser.FromJson(statusJson, runtimeJson);
-            info.Reachable = true;
+            BridgeInfo info = RuntimeBridgeClient.Query(port, _config.BridgeToken);
+            if (info == null) return null;
             _bridgeInfo = info;
             _bridgeInfoAt = DateTime.UtcNow;
             return info;
@@ -372,13 +363,7 @@ namespace DshWebManager
         /// <summary>Rich runtime status from the cached bridge payload ("" when unknown).</summary>
         public string GetRuntimeSummary(int port)
         {
-            BridgeInfo info = _bridgeInfo;
-            if (info == null || !info.Reachable) return String.Empty;
-            StringBuilder sb = new StringBuilder();
-            if (!String.IsNullOrEmpty(info.DshVersion)) sb.Append("dsh ").Append(info.DshVersion);
-            if (!String.IsNullOrEmpty(info.Node)) { if (sb.Length > 0) sb.Append(" · "); sb.Append("node ").Append(info.Node); }
-            if (info.UptimeMs > 0) { if (sb.Length > 0) sb.Append(" · "); sb.Append("运行 ").Append(BridgeInfoParser.FormatUptime(info.UptimeMs)); }
-            return sb.ToString();
+            return _bridgeInfo == null ? String.Empty : _bridgeInfo.Summary;
         }
     }
 }

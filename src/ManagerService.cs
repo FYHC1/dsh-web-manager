@@ -204,16 +204,15 @@ namespace DshWebManager
             });
         }
 
-        /// <summary>Current dsh version from the first reachable WSL runtime bridge ("" if none).</summary>
+        /// <summary>Current dsh version from the first reachable runtime bridge ("" if none).</summary>
         private string TryGetBridgeDshVersion()
         {
             foreach (InstanceController c in _controllers)
             {
-                WslBackend wsl = c.Backend as WslBackend;
-                if (wsl == null) continue;
+                if (c.Backend == null) continue;
                 try
                 {
-                    BridgeInfo info = wsl.QueryBridgeInfo(c.ActivePort);
+                    BridgeInfo info = c.Backend.QueryBridgeInfo(c.ActivePort);
                     if (info != null && info.Reachable && !String.IsNullOrEmpty(info.DshVersion))
                         return info.DshVersion;
                 }
