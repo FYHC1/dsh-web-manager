@@ -1,4 +1,4 @@
-﻿﻿# 验证矩阵（v2.0 + v2.1 真机实测记录）
+﻿﻿﻿# 验证矩阵（v2.0 + v2.1 真机实测记录）
 
 测试机：Windows 11 22H2 + WSL2（FedoraLinux 运行中 / FedoraLinux44 默认但 Stopped）
 dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm/.../dsh`
@@ -94,6 +94,11 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 - **systemd unit 生成**：manager 物化 wsl-systemd-start.sh（前台 exec dsh）+ 写
   ~/.config/systemd/user/dsh-web-<port>.service（Type=simple / Restart=on-failure /
   journald 日志），文件写入不依赖 systemd 运行，可在启用前预置。
+- **真实故障 2（2026-08-21，已修复）**：WSL 重启/冷启动后 localhostForwarding 需数秒~数十秒
+  才建立；manager 在 forwarding 就绪前判定"关闭"并弹通知/开空窗，重启 manager 仍复现。
+  修复：OpenWindow 后台重试（4×5s=20s 宽限，成功即开窗，最终失败才按 IsServiceUp 区分
+  通知文案）；StartSystemd 前 WaitSystemdUserReady（探测 /run/user/<uid>/systemd/private，
+  最多 30s），WSL 冷启动时 systemctl start 不再立即失败。
 - **真实故障（2026-08-21，已修复）**：用户关闭 WSL 后重启 manager，自动发行版选择在
   无"运行中"候选时落到默认标记的 **FedoraLinux44**（不可用镜像发行版：`Failed to start
   the systemd user session`、`command -v dsh` 命中 Windows interop 的 /mnt/c/nvm4w），
