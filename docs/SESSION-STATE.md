@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
+﻿﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
 
 > 本文件用途：会话压缩/恢复时读取，重建关键事实与未完成事项。
 > 最后更新：2026-08-21 v2.2 交付后
@@ -60,6 +60,20 @@
   命中 Windows interop 的 /mnt/c/nvm4w/nodejs/dsh）；forwarding 实际正常
 - 修复：`LastWslDistro` 记忆上次成功（managed/attached）的发行版，选择优先级
   配置 > 上次成功 > 运行中 > 唯一 > 默认 > 打分；通知文案区分"forwarding 关"与"服务未就绪"
+
+### 故障 4：WSL VM 空闲关闭 → systemd 服务反复重启（failed to fetch 真正根因）
+- 现象：unit 每 ~18s 干净停止、user@1000 PID 反复变化、manager 崩溃计数循环
+- 根因：journald `systemd-logind: The system will power off now!` 每 ~22s 一次 =
+  **整个 WSL VM 反复关闭重启**。WSL2 无持久 wsl.exe 客户端时 VM 空闲即关；
+  systemd 模式所有调用都是短连接 → VM 关启循环 → unit 反复死。
+  （用户打开 WSL 终端后 VM 立即稳定 —— 持久客户端保活，证实假设）
+- 修复：
+  1. systemd 模式 StartSystemd 后保持持久 wsl.exe 客户端（`sleep infinity`）保活 VM，
+     Stop 时 taskkill 释放
+  2. Exit 停服后关闭 Edge 窗口（WM_CLOSE），不残留死窗口
+  3. Program.Main：主实例 acquire mutex 后收到 exit 直接退出（此前 exit 转发失败会
+     变成普通托盘启动 → manager 永远停不掉）
+- 备注：`loginctl enable-linger` 已启用（解决 user@ 会话依赖）；VM 保活是更根本修复
 
 ### 故障 3：user@1000 用户 systemd 实例频繁重启 → Failed to fetch (internal)
 - 现象：manager 托管期间 dsh web 窗口报 "Failed to fetch (internal)"，尝试使用无果
