@@ -15,12 +15,14 @@ namespace DshWebManager
         private readonly List<InstanceController> _controllers = new List<InstanceController>();
         private readonly System.Threading.Timer _timer;
         private readonly Dictionary<InstanceController, bool> _hadWindows = new Dictionary<InstanceController, bool>();
+        private readonly object _sync = new object();
         private DateTime _lastSizeCapture = DateTime.MinValue;
         private DateTime _lastRuntimeRefresh = DateTime.MinValue;
         private bool _disposed;
 
         public event Action<string> StatusChanged;   // UI thread marshaling is done by the frontend
         public event Action<string, string> Balloon; // title, text
+        public event Action InstancesChanged;        // raised after add/remove instance (v3.0 P2-2)
 
         public IList<InstanceController> Controllers { get { return _controllers; } }
         public InstanceController Controller { get { return _controllers.Count > 0 ? _controllers[0] : null; } }
@@ -57,6 +59,77 @@ namespace DshWebManager
         {
             var h = StatusChanged;
             if (h != null) h(text);
+        }
+
+        /// <summary>Snapshot of the current controllers (the list is mutated by add/remove).</summary>
+        private List<InstanceController> Snapshot()
+        {
+            lock (_sync) { return new List<InstanceController>(_controllers); }
+        }
+
+        /// <summary>Adds a new instance at runtime and starts it (v3.0 P2-2).</summary>
+        public void AddInstance(InstanceConfig inst)
+        {
+            if (inst == null) return;
+            if (String.IsNullOrEmpty(inst.Id))
+            {
+                Balloon("dsh web manager", "实例 Id 不能为空");
+                return;
+            }
+            // Ensure an explicit instance list exists (legacy single-instance migration).
+            if (_config.Instances == null)
+            {
+                _config.Instances = new List<InstanceConfig>();
+                foreach (InstanceConfig e in _config.EffectiveInstances) _config.Instances.Add(e);
+            }
+            foreach (InstanceConfig e in _config.Instances)
+                if (String.Equals(e.Id, inst.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    Balloon("dsh web manager", "实例 Id 已存在: " + inst.Id);
+                    return;
+                }
+            if (inst.Window == null) inst.Window = new WindowConfig();
+            if (String.IsNullOrEmpty(inst.Profile)) inst.Profile = "web";
+            if (String.IsNullOrEmpty(inst.WslServiceMode)) inst.WslServiceMode = "wrapper";
+            inst.Enabled = true;
+            _config.Instances.Add(inst);
+            _config.Save();
+            InstanceController c = new InstanceController(_config, inst);
+            c.StatusChanged += OnControllerStatus;
+            lock (_sync) { _controllers.Add(c); }
+            c.Start();
+            var h = InstancesChanged; if (h != null) h();
+        }
+
+        /// <summary>Removes the instance at the given controller index (v3.0 P2-2).</summary>
+        public void RemoveInstance(int index)
+        {
+            InstanceController c = null;
+            lock (_sync)
+            {
+                if (index < 0 || index >= _controllers.Count) return;
+                c = _controllers[index];
+            }
+            if (_config.Instances == null)
+            {
+                _config.Instances = new List<InstanceConfig>();
+                foreach (InstanceConfig e in _config.EffectiveInstances) _config.Instances.Add(e);
+            }
+            if (_config.Instances.Count <= 1)
+            {
+                Balloon("dsh web manager", "至少保留一个实例");
+                return;
+            }
+            _config.Instances.Remove(c.Instance);
+            _config.Save();
+            lock (_sync)
+            {
+                _controllers.Remove(c);
+                _hadWindows.Remove(c);
+            }
+            try { c.Stop(false); } catch (Exception ex) { FileLog.Error("RemoveInstance stop failed: " + ex.Message); }
+            try { EdgeWindow.CloseWindow(c.ActivePort); } catch { }
+            var h = InstancesChanged; if (h != null) h();
         }
 
         public void OpenWindow() { OpenWindow(0); }
@@ -381,7 +454,7 @@ namespace DshWebManager
             if (_disposed) return;
             try
             {
-                foreach (InstanceController c in _controllers)
+                foreach (InstanceController c in Snapshot())
                 {
                     c.Tick();
                     HandleInstanceWindow(c);
@@ -391,7 +464,7 @@ namespace DshWebManager
                 if (DateTime.Now.Subtract(_lastSizeCapture).TotalSeconds >= 2)
                 {
                     _lastSizeCapture = DateTime.Now;
-                    foreach (InstanceController c in _controllers)
+                    foreach (InstanceController c in Snapshot())
                         EdgeWindow.CaptureSize(c.ActivePort, c.Instance.Window, delegate { _config.Save(); }, DateTime.Now);
                 }
 
@@ -400,7 +473,7 @@ namespace DshWebManager
                 if (DateTime.Now.Subtract(_lastRuntimeRefresh).TotalSeconds >= 10)
                 {
                     _lastRuntimeRefresh = DateTime.Now;
-                    foreach (InstanceController c in _controllers)
+                    foreach (InstanceController c in Snapshot())
                     {
                         string before = c.RuntimeSummary;
                         c.RefreshRuntime();
