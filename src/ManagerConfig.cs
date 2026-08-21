@@ -1,4 +1,5 @@
-﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Web.Script.Serialization;
 
@@ -9,6 +10,24 @@ namespace DshWebManager
     {
         public string Size { get; set; }       // "WxH"
         public string Position { get; set; }   // "X,Y"
+    }
+
+    /// <summary>One independently managed dsh web instance (v3.0 multi-instance).</summary>
+    public sealed class InstanceConfig
+    {
+        public string Id { get; set; }            // stable id, e.g. "default" / "wsl"
+        public string Profile { get; set; }       // dsh profile name
+        public string BackendType { get; set; }   // "windows" | "wsl"
+        public int Port { get; set; }             // windows backend port
+        public int WslPort { get; set; }          // wsl backend port
+        public string WslDistro { get; set; }     // pinned distro ("" = auto)
+        public string WslServiceMode { get; set; }// "wrapper" | "systemd"
+        public WindowConfig Window { get; set; }
+        public bool Enabled { get; set; }
+
+        public bool IsWsl { get { return String.Equals(BackendType, "wsl", StringComparison.OrdinalIgnoreCase); } }
+        public int EffectivePort { get { return IsWsl ? WslPort : Port; } }
+        public void SetEffectivePort(int value) { if (IsWsl) WslPort = value; else Port = value; }
     }
 
     public sealed class ManagerConfig
@@ -28,6 +47,41 @@ namespace DshWebManager
         public string BridgeToken { get; set; }   // dsh runtime bridge shared secret (v3.0)
         public string Profile { get; set; }        // dsh profile name (default web)
         public string Version { get; set; }
+
+        /// <summary>v3.0 multi-instance list; empty falls back to the legacy single
+        /// instance fields (migration view in EffectiveInstances).</summary>
+        public List<InstanceConfig> Instances { get; set; }
+
+        /// <summary>Instances to run: the configured list, or the legacy fields as one.</summary>
+        public List<InstanceConfig> EffectiveInstances
+        {
+            get
+            {
+                if (Instances != null && Instances.Count > 0)
+                {
+                    foreach (InstanceConfig inst in Instances)
+                    {
+                        if (inst.Window == null) inst.Window = new WindowConfig();
+                        if (String.IsNullOrEmpty(inst.WslServiceMode)) inst.WslServiceMode = "wrapper";
+                        if (String.IsNullOrEmpty(inst.Profile)) inst.Profile = "web";
+                    }
+                    return Instances;
+                }
+                List<InstanceConfig> legacy = new List<InstanceConfig>();
+                InstanceConfig one = new InstanceConfig();
+                one.Id = "default";
+                one.Profile = Profile;
+                one.BackendType = BackendType;
+                one.Port = Port;
+                one.WslPort = WslPort;
+                one.WslDistro = WslDistro;
+                one.WslServiceMode = WslServiceMode;
+                one.Window = Window;
+                one.Enabled = true;
+                legacy.Add(one);
+                return legacy;
+            }
+        }
 
         public bool IsWsl
         {
@@ -59,6 +113,7 @@ namespace DshWebManager
             BridgeToken = String.Empty;
             Profile = "web";
             Version = "2.1.0";
+            Instances = null; // null = legacy single-instance mode
         }
 
         public static ManagerConfig Load()

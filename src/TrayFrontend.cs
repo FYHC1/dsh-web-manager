@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿﻿﻿﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -16,6 +16,8 @@ namespace DshWebManager
         private readonly ToolStripMenuItem _backendWslItem;
         private readonly ToolStripMenuItem _modeWrapperItem;
         private readonly ToolStripMenuItem _modeSystemdItem;
+        private readonly System.Collections.Generic.List<ToolStripMenuItem> _instanceItems =
+            new System.Collections.Generic.List<ToolStripMenuItem>();
         private bool _closing;
 
         private static string MenuOpen = "\u6253\u5f00\u7a97\u53e3";            // 打开窗口
@@ -29,6 +31,7 @@ namespace DshWebManager
         private static string MenuWslMode = "WSL \u670d\u52a1\u6a21\u5f0f";       // WSL 服务模式
         private static string MenuWslModeWrapper = "wrapper (\u81ea\u6108\u811a\u672c)";  // wrapper (自愈脚本)
         private static string MenuWslModeSystemd = "systemd (unit)";
+        private static string MenuInstances = "\u5b9e\u4f8b";                    // 实例
         private static string Title = "dsh web manager";
 
         public TrayFrontend(ManagerService service)
@@ -67,12 +70,36 @@ namespace DshWebManager
 
             RefreshBackendCheck();
 
+            // v3.0 multi-instance: each extra instance gets its own submenu.
+            ToolStripMenuItem instancesMenu = null;
+            if (_service.Controllers.Count > 1)
+            {
+                instancesMenu = new ToolStripMenuItem(MenuInstances);
+                for (int i = 1; i < _service.Controllers.Count; i++)
+                {
+                    int idx = i;
+                    InstanceController ic = _service.Controllers[idx];
+                    ToolStripMenuItem item = new ToolStripMenuItem(InstanceLabel(ic));
+                    ToolStripMenuItem openItem = new ToolStripMenuItem(MenuOpen, null, delegate { _service.OpenWindow(idx); });
+                    ToolStripMenuItem restartItem = new ToolStripMenuItem(MenuRestart, null, delegate { RestartInstance(idx); });
+                    ToolStripMenuItem statusItem = new ToolStripMenuItem(MenuStatus + ": ...");
+                    statusItem.Enabled = false;
+                    item.DropDownItems.Add(openItem);
+                    item.DropDownItems.Add(restartItem);
+                    item.DropDownItems.Add(new ToolStripSeparator());
+                    item.DropDownItems.Add(statusItem);
+                    _instanceItems.Add(item);
+                    instancesMenu.DropDownItems.Add(item);
+                }
+            }
+
             _menu = new ContextMenuStrip();
             _menu.Items.Add(new ToolStripMenuItem(MenuOpen, null, delegate { _service.OpenWindow(); }));
             _menu.Items.Add(new ToolStripMenuItem(MenuRestart, null, delegate { _service.Restart(); }));
             _menu.Items.Add(_autoStartItem);
             _menu.Items.Add(backendMenu);
             _menu.Items.Add(modeMenu);
+            if (instancesMenu != null) _menu.Items.Add(instancesMenu);
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(_statusItem);
             _menu.Items.Add(new ToolStripSeparator());
@@ -104,6 +131,25 @@ namespace DshWebManager
             return SystemIcons.Application;
         }
 
+        private static string InstanceLabel(InstanceController c)
+        {
+            string where = c.BackendDescribe;
+            if (String.IsNullOrEmpty(where)) where = c.Instance == null ? "?" : c.Instance.Id;
+            return where + " :" + c.ActivePort;
+        }
+
+        private void RestartInstance(int index)
+        {
+            InstanceController c = _service.GetController(index);
+            if (c == null) return;
+            c.Restart();
+            try
+            {
+                EdgeWindow.EnsureVisible(_service.Config, c.Backend.GetWindowUrl(c.ActivePort), c.ActivePort);
+            }
+            catch (Exception ex) { FileLog.Error("RestartInstance window: " + ex.Message); }
+        }
+
         private void OnMouseClick(object sender, MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left)
@@ -117,6 +163,14 @@ namespace DshWebManager
                 if (_statusItem != null) _statusItem.Text = MenuStatus + ": " + text;
                 _notify.Text = Title + " - " + text;
                 RefreshBackendCheck();
+                for (int i = 0; i < _instanceItems.Count && i + 1 < _service.Controllers.Count; i++)
+                {
+                    ToolStripMenuItem item = _instanceItems[i];
+                    InstanceController ic = _service.Controllers[i + 1];
+                    item.Text = InstanceLabel(ic);
+                    if (item.DropDownItems.Count >= 3)
+                        item.DropDownItems[2].Text = MenuStatus + ": " + ic.StatusText;
+                }
             }
             catch { }
         }

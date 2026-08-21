@@ -1,5 +1,6 @@
-﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Threading;
+using System.Collections.Generic;
 using System.Windows.Forms;
 
 namespace DshWebManager
@@ -11,7 +12,7 @@ namespace DshWebManager
     public sealed class ManagerService : IDisposable
     {
         private readonly ManagerConfig _config;
-        private readonly InstanceController _controller;
+        private readonly List<InstanceController> _controllers = new List<InstanceController>();
         private readonly System.Threading.Timer _timer;
         private bool _hadWindow;
         private DateTime _lastSizeCapture = DateTime.MinValue;
@@ -20,16 +21,22 @@ namespace DshWebManager
         public event Action<string> StatusChanged;   // UI thread marshaling is done by the frontend
         public event Action<string, string> Balloon; // title, text
 
-        public InstanceController Controller { get { return _controller; } }
+        public IList<InstanceController> Controllers { get { return _controllers; } }
+        public InstanceController Controller { get { return _controllers.Count > 0 ? _controllers[0] : null; } }
         public ManagerConfig Config { get { return _config; } }
-        public InstanceState State { get { return _controller.State; } }
-        public IServiceBackend Backend { get { return _controller.Backend; } }
+        public InstanceState State { get { return Controller == null ? InstanceState.Stopped : Controller.State; } }
+        public IServiceBackend Backend { get { return Controller == null ? null : Controller.Backend; } }
 
         public ManagerService(ManagerConfig config)
         {
             _config = config;
-            _controller = new InstanceController(config);
-            _controller.StatusChanged += OnControllerStatus;
+            foreach (InstanceConfig inst in config.EffectiveInstances)
+            {
+                if (!inst.Enabled) continue;
+                InstanceController c = new InstanceController(config, inst);
+                c.StatusChanged += OnControllerStatus;
+                _controllers.Add(c);
+            }
             _timer = new System.Threading.Timer(Tick, null, Timeout.Infinite, Timeout.Infinite);
         }
 
@@ -37,7 +44,7 @@ namespace DshWebManager
         {
             _config.MigrateLegacyWindowSize();
             _config.Save();
-            _controller.Start();
+            foreach (InstanceController c in _controllers) c.Start();
             if (String.Equals(action, "open", StringComparison.OrdinalIgnoreCase))
                 OpenWindow();
             _timer.Change(0, 1000);
@@ -49,43 +56,53 @@ namespace DshWebManager
             if (h != null) h(text);
         }
 
-        public void OpenWindow()
+        public void OpenWindow() { OpenWindow(0); }
+
+        public void OpenWindow(int index)
         {
+            InstanceController c = GetController(index);
+            if (c == null) return;
             // Make sure the service is online first; a window pointing at a dead
             // port is useless.
-            if (_controller.State == InstanceState.Stopped || _controller.State == InstanceState.Error)
+            if (c.State == InstanceState.Stopped || c.State == InstanceState.Error)
             {
                 ThreadPool.QueueUserWorkItem(_ =>
                 {
                     try
                     {
-                        _controller.Start(); // may block up to the startup timeout
-                        OpenWindowCore();
+                        c.Start(); // may block up to the startup timeout
+                        OpenWindowCore(c);
                     }
                     catch (Exception ex) { FileLog.Error("OpenWindow(start) failed: " + ex.Message); }
                 });
                 return;
             }
-            OpenWindowCore();
+            OpenWindowCore(c);
+        }
+
+        public InstanceController GetController(int index)
+        {
+            if (index >= 0 && index < _controllers.Count) return _controllers[index];
+            return _controllers.Count > 0 ? _controllers[0] : null;
         }
 
         private const int WindowRetryMax = 4;   // 5 s apart -> ~20 s grace for WSL cold start
 
-        private void OpenWindowCore()
+        private void OpenWindowCore(InstanceController c)
         {
-            string url = WindowUrl();
+            string url = WindowUrl(c);
             if (String.IsNullOrEmpty(url))
             {
                 // WSL may be cold-starting: localhost forwarding can take several
                 // seconds (or longer) to come up after the distro boots. Retry in
                 // the background before declaring the service unreachable.
                 FileLog.Info("OpenWindow: URL not ready, scheduling retries (WSL cold start?)");
-                ScheduleWindowRetry(0);
+                ScheduleWindowRetry(0, c);
                 return;
             }
             try
             {
-                EdgeWindow.EnsureVisible(_config, url, _controller.ActivePort);
+                EdgeWindow.EnsureVisible(_config, url, c.ActivePort);
                 _hadWindow = true;
             }
             catch (Exception ex)
@@ -95,7 +112,7 @@ namespace DshWebManager
             }
         }
 
-        private void ScheduleWindowRetry(int attempt)
+        private void ScheduleWindowRetry(int attempt, InstanceController c)
         {
             if (attempt >= WindowRetryMax)
             {
@@ -103,7 +120,7 @@ namespace DshWebManager
                 var b = Balloon;
                 if (b == null) return;
                 bool serviceUp = false;
-                try { serviceUp = _controller.Backend.IsServiceUp(_controller.ActivePort); }
+                try { serviceUp = c.Backend.IsServiceUp(c.ActivePort); }
                 catch { }
                 if (serviceUp)
                     b("dsh web manager", "WSL 服务在运行，但 localhostForwarding 关闭，Windows 无法访问；请开启 localhostForwarding 或在 WSL 内使用浏览器");
@@ -116,35 +133,35 @@ namespace DshWebManager
                 Thread.Sleep(5000);
                 try
                 {
-                    string url = WindowUrl();
+                    string url = WindowUrl(c);
                     if (!String.IsNullOrEmpty(url))
                     {
-                        EdgeWindow.EnsureVisible(_config, url, _controller.ActivePort);
+                        EdgeWindow.EnsureVisible(_config, url, c.ActivePort);
                         _hadWindow = true;
                         FileLog.Info("OpenWindow: retry succeeded after ~" + ((attempt + 1) * 5) + "s");
                         return;
                     }
-                    ScheduleWindowRetry(attempt + 1);
+                    ScheduleWindowRetry(attempt + 1, c);
                 }
                 catch (Exception ex)
                 {
                     FileLog.Error("OpenWindow retry failed: " + ex.Message);
-                    ScheduleWindowRetry(attempt + 1);
+                    ScheduleWindowRetry(attempt + 1, c);
                 }
             });
         }
 
         /// <summary>Window URL for the active backend/port (empty = not reachable from Windows).</summary>
-        private string WindowUrl()
+        private string WindowUrl(InstanceController c)
         {
-            try { return _controller.Backend.GetWindowUrl(_controller.ActivePort); }
+            try { return c.Backend.GetWindowUrl(c.ActivePort); }
             catch (Exception ex) { FileLog.Error("WindowUrl failed: " + ex.Message); }
-            return "http://127.0.0.1:" + _controller.ActivePort + "/";
+            return "http://127.0.0.1:" + c.ActivePort + "/";
         }
 
         public void Restart()
         {
-            _controller.Restart();
+            foreach (InstanceController c in _controllers) c.Restart();
             OpenWindowAfterDelay();
         }
 
@@ -164,13 +181,12 @@ namespace DshWebManager
                 Balloon("dsh web manager", "服务模式已是 " + mode);
                 return;
             }
-            bool hadWindow = EdgeWindow.FindAppWindow(_controller.ActivePort) != IntPtr.Zero;
-            try { _controller.Stop(true); }
+            bool hadWindow = EdgeWindow.FindAppWindow(Controller.ActivePort) != IntPtr.Zero;
+            try { Controller.Stop(true); }
             catch (Exception ex) { FileLog.Error("SetWslMode stop failed: " + ex.Message); }
             _config.WslServiceMode = mode.ToLowerInvariant();
             _config.Save();
-            _controller.Reconfigure();
-            _controller.Start();
+            foreach (InstanceController c in _controllers) { c.Reconfigure(); c.Start(); }
             if (hadWindow) OpenWindowAfterDelay();
             Balloon("dsh web manager", "WSL 服务模式已切换: " + mode);
         }
@@ -186,15 +202,14 @@ namespace DshWebManager
                 Balloon("dsh web manager", "后端已是 " + type);
                 return;
             }
-            bool hadWindow = EdgeWindow.FindAppWindow(_controller.ActivePort) != IntPtr.Zero;
-            try { _controller.Stop(true); }
+            bool hadWindow = EdgeWindow.FindAppWindow(Controller.ActivePort) != IntPtr.Zero;
+            try { Controller.Stop(true); }
             catch (Exception ex) { FileLog.Error("SetBackend stop failed: " + ex.Message); }
             _config.BackendType = type.ToLowerInvariant();
             _config.Save();
-            _controller.Reconfigure();
-            _controller.Start();
+            foreach (InstanceController c in _controllers) { c.Reconfigure(); c.Start(); }
             if (hadWindow) OpenWindowAfterDelay();
-            Balloon("dsh web manager", "已切换到 " + _controller.BackendDescribe + " 后端");
+            Balloon("dsh web manager", "已切换到 " + Controller.BackendDescribe + " 后端");
         }
 
         private void OpenWindowAfterDelay()
@@ -234,12 +249,15 @@ namespace DshWebManager
         {
             if (stopService || !_config.ExitKeepService)
             {
-                try { _controller.Stop(false); }
-                catch (Exception ex) { FileLog.Error("Exit stop failed: " + ex.Message); }
-                // The service is gone: close the app window it served so no dead
-                // window is left behind after the manager exits.
-                try { EdgeWindow.CloseWindow(_controller.ActivePort); }
-                catch (Exception ex) { FileLog.Error("Exit close window failed: " + ex.Message); }
+                foreach (InstanceController c in _controllers)
+                {
+                    try { c.Stop(false); }
+                    catch (Exception ex) { FileLog.Error("Exit stop failed: " + ex.Message); }
+                    // The service is gone: close the app window it served so no dead
+                    // window is left behind after the manager exits.
+                    try { EdgeWindow.CloseWindow(c.ActivePort); }
+                    catch (Exception ex) { FileLog.Error("Exit close window failed: " + ex.Message); }
+                }
             }
             _disposed = true;
             // Hard exit: guarantees the tray process terminates even when the UI
@@ -252,11 +270,15 @@ namespace DshWebManager
             if (_disposed) return;
             try
             {
-                _controller.Tick();
+                foreach (InstanceController c in _controllers) c.Tick();
 
-                int port = _controller.ActivePort;
+                // Window handling for the first controller (single-window UX for now;
+                // multi-instance window management can extend this per instance).
+                InstanceController c0 = Controller;
+                if (c0 == null) return;
+                int port = c0.ActivePort;
                 // Icon: re-apply continuously so transient Edge icon changes are overridden.
-                if (_controller.State == InstanceState.Managed || _controller.State == InstanceState.Attached)
+                if (c0.State == InstanceState.Managed || c0.State == InstanceState.Attached)
                     EdgeWindow.ApplyIconToWindow(port);
 
                 // Window presence edge detection (close-window semantics).
@@ -264,9 +286,9 @@ namespace DshWebManager
                 if (_hadWindow && !hasWindow)
                 {
                     FileLog.Info("App window closed (port " + port + ")");
-                    if (_config.CloseStopsService && _controller.State == InstanceState.Managed)
+                    if (_config.CloseStopsService && c0.State == InstanceState.Managed)
                     {
-                        _controller.Stop(false);
+                        c0.Stop(false);
                         var b = Balloon; if (b != null) b("dsh web manager", "窗口已关闭，服务已停止");
                     }
                     // Default: service keeps running; tray can re-open the window anytime.

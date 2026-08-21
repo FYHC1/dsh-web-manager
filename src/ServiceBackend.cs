@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿﻿﻿using System;
 using System.Diagnostics;
 
 namespace DshWebManager
@@ -34,9 +34,16 @@ namespace DshWebManager
     {
         public static IServiceBackend Create(ManagerConfig config)
         {
-            if (config != null && String.Equals(config.BackendType, "wsl", StringComparison.OrdinalIgnoreCase))
-                return new WslBackend(config);
-            return new WindowsBackend(config);
+            if (config == null || config.EffectiveInstances == null || config.EffectiveInstances.Count == 0)
+                return new WindowsBackend(config, null);
+            return Create(config, config.EffectiveInstances[0]);
+        }
+
+        public static IServiceBackend Create(ManagerConfig shared, InstanceConfig instance)
+        {
+            if (instance != null && instance.IsWsl)
+                return new WslBackend(shared, instance);
+            return new WindowsBackend(shared, instance);
         }
     }
 
@@ -46,9 +53,11 @@ namespace DshWebManager
         private readonly ManagerConfig _config;
         private Process _proc;
 
-        public WindowsBackend(ManagerConfig config)
+        public WindowsBackend(ManagerConfig config) { _config = config; }
+
+        public WindowsBackend(ManagerConfig shared, InstanceConfig instance)
         {
-            _config = config;
+            _config = shared;
         }
 
         public string BackendType { get { return "windows"; } }

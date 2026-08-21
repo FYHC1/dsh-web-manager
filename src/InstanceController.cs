@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿﻿﻿﻿﻿﻿using System;
 using System.Diagnostics;
 
 namespace DshWebManager
@@ -26,6 +26,7 @@ namespace DshWebManager
 
         private readonly object _sync = new object();
         private readonly ManagerConfig _config;
+        private readonly InstanceConfig _instance;
         private IServiceBackend _backend;
 
         public int ActivePort { get; private set; }
@@ -43,13 +44,16 @@ namespace DshWebManager
 
         public event Action<string> StatusChanged;
 
-        public InstanceController(ManagerConfig config)
+        public InstanceController(ManagerConfig config, InstanceConfig instance)
         {
             _config = config;
+            _instance = instance;
             State = InstanceState.Stopped;
-            ActivePort = config.EffectivePort;
-            _backend = BackendFactory.Create(config);
+            ActivePort = instance.EffectivePort;
+            _backend = BackendFactory.Create(config, instance);
         }
+
+        public InstanceConfig Instance { get { return _instance; } }
 
         public string StatusText
         {
@@ -73,8 +77,8 @@ namespace DshWebManager
         {
             lock (_sync)
             {
-                _backend = BackendFactory.Create(_config);
-                ActivePort = _config.EffectivePort;
+                _backend = BackendFactory.Create(_config, _instance);
+                ActivePort = _instance.EffectivePort;
                 State = InstanceState.Stopped;
                 LastError = null;
                 _missingCount = 0;
@@ -98,7 +102,7 @@ namespace DshWebManager
                     return;
                 }
 
-                int preferred = _config.EffectivePort;
+                int preferred = _instance.EffectivePort;
                 PortProbeResult probe = _backend.ProbePort(preferred);
 
                 if (probe == PortProbeResult.DshServing)
@@ -123,7 +127,7 @@ namespace DshWebManager
                         return;
                     }
                     ActivePort = chosen;
-                    _config.SetEffectivePort(chosen);
+                    _instance.SetEffectivePort(chosen);
                     _config.Save();
                     FireStatus("端口 " + preferred + " 被占用，顺延至 " + chosen);
                 }
@@ -135,7 +139,7 @@ namespace DshWebManager
                 State = InstanceState.Starting;
                 try
                 {
-                    if (!_backend.Start(ActivePort, _config.Profile))
+                    if (!_backend.Start(ActivePort, _instance.Profile))
                     {
                         State = InstanceState.Error;
                         LastError = "后端启动失败 (" + _backend.Describe() + ")";
@@ -268,7 +272,7 @@ namespace DshWebManager
                 FireStatus("检测到服务停止，自动重启 (" + _crashCount + "/" + CrashLimit + ")");
                 try
                 {
-                    if (!_backend.Start(ActivePort, _config.Profile))
+                    if (!_backend.Start(ActivePort, _instance.Profile))
                     {
                         State = InstanceState.Error;
                         LastError = "自动重启失败 (" + _backend.Describe() + ")";

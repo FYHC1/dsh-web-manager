@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -22,7 +22,8 @@ namespace DshWebManager
     /// </summary>
     public sealed class WslBackend : IServiceBackend
     {
-        private readonly ManagerConfig _config;
+        private readonly ManagerConfig _config;    // shared config (LastWslDistro / BridgeToken)
+        private readonly InstanceConfig _instance; // per-instance config (distro / service mode)
         private Process _proc;
         private Process _keepalive;   // persistent wsl.exe client holding the WSL VM alive (systemd mode)
         private string _distro = String.Empty;
@@ -30,8 +31,14 @@ namespace DshWebManager
         private int _lastPort;
 
         public WslBackend(ManagerConfig config)
+            : this(config, config == null || config.EffectiveInstances == null || config.EffectiveInstances.Count == 0 ? null : config.EffectiveInstances[0])
         {
-            _config = config;
+        }
+
+        public WslBackend(ManagerConfig shared, InstanceConfig instance)
+        {
+            _config = shared;
+            _instance = instance;
         }
 
         public string BackendType { get { return "wsl"; } }
@@ -71,7 +78,7 @@ namespace DshWebManager
             }
             catch { }
             string distro;
-            if (!WslTools.ResolveDistro(_config.WslDistro, _config.LastWslDistro, out distro))
+            if (!WslTools.ResolveDistro(_instance.WslDistro, _config.LastWslDistro, out distro))
             {
                 error = "未找到可用的 WSL 发行版（可在配置 wslDistro 中指定）";
                 return false;
@@ -87,7 +94,7 @@ namespace DshWebManager
         /// </summary>
         private void ResolveMode()
         {
-            bool wantSystemd = String.Equals(_config.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
+            bool wantSystemd = String.Equals(_instance.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
             if (wantSystemd && WslTools.SystemdAvailable(_distro))
             {
                 _mode = WslServiceModeKind.Systemd;
