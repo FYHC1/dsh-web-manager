@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -32,6 +32,8 @@ namespace DshWebManager
         private static string MenuWslModeWrapper = "wrapper (\u81ea\u6108\u811a\u672c)";  // wrapper (自愈脚本)
         private static string MenuWslModeSystemd = "systemd (unit)";
         private static string MenuInstances = "\u5b9e\u4f8b";                    // 实例
+        private static string MenuCheckUpdate = "\u68c0\u67e5\u66f4\u65b0";    // 检查更新
+        private static string MenuUpdateDsh = "\u66f4\u65b0 dsh";                // 更新 dsh
         private static string Title = "dsh web manager";
 
         public TrayFrontend(ManagerService service)
@@ -100,6 +102,12 @@ namespace DshWebManager
             _menu.Items.Add(backendMenu);
             _menu.Items.Add(modeMenu);
             if (instancesMenu != null) _menu.Items.Add(instancesMenu);
+            ToolStripMenuItem checkItem = new ToolStripMenuItem(MenuCheckUpdate, null, delegate { _service.CheckForUpdates(); });
+            ToolStripMenuItem updateItem = new ToolStripMenuItem(MenuUpdateDsh, null, delegate { _service.ApplyDshUpdate(); });
+            ToolStripMenuItem updatesMenu = new ToolStripMenuItem("\u66f4\u65b0"); // 更新
+            updatesMenu.DropDownItems.Add(checkItem);
+            updatesMenu.DropDownItems.Add(updateItem);
+            _menu.Items.Add(updatesMenu);
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(_statusItem);
             _menu.Items.Add(new ToolStripSeparator());

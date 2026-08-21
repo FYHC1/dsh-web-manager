@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Web.Script.Serialization;
@@ -45,6 +45,8 @@ namespace DshWebManager
         public string WslServiceMode { get; set; } // "wrapper" | "systemd" (v3.0); systemd unavailable -> auto fallback to wrapper
         public string LastWslDistro { get; set; } // remembered last working distro (v3.0, auto distro selection)
         public string BridgeToken { get; set; }   // dsh runtime bridge shared secret (v3.0)
+        public string LastVersionCheckUtc { get; set; } // update check throttle (v3.0)
+        public string LastKnownLatest { get; set; }     // last known latest dsh version (v3.0)
         public string Profile { get; set; }        // dsh profile name (default web)
         public string Version { get; set; }
 
@@ -111,6 +113,8 @@ namespace DshWebManager
             WslServiceMode = "wrapper";
             LastWslDistro = String.Empty;
             BridgeToken = String.Empty;
+            LastVersionCheckUtc = String.Empty;
+            LastKnownLatest = String.Empty;
             Profile = "web";
             Version = "2.1.0";
             Instances = null; // null = legacy single-instance mode
@@ -135,6 +139,8 @@ namespace DshWebManager
                         if (String.IsNullOrEmpty(loaded.WslServiceMode)) loaded.WslServiceMode = "wrapper";
                         if (loaded.LastWslDistro == null) loaded.LastWslDistro = String.Empty;
                         if (loaded.BridgeToken == null) loaded.BridgeToken = String.Empty;
+                        if (loaded.LastVersionCheckUtc == null) loaded.LastVersionCheckUtc = String.Empty;
+                        if (loaded.LastKnownLatest == null) loaded.LastKnownLatest = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
                         if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "2.1.0";
                         return loaded;

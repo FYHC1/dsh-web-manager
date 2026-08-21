@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Threading;
 using System.Collections.Generic;
 using System.Windows.Forms;
@@ -48,6 +48,8 @@ namespace DshWebManager
             if (String.Equals(action, "open", StringComparison.OrdinalIgnoreCase))
                 OpenWindow();
             _timer.Change(0, 1000);
+            // v3.0: throttled dsh update check in the background (24 h).
+            ThreadPool.QueueUserWorkItem(_ => CheckForUpdates());
         }
 
         private void OnControllerStatus(string text)
@@ -157,6 +159,70 @@ namespace DshWebManager
             try { return c.Backend.GetWindowUrl(c.ActivePort); }
             catch (Exception ex) { FileLog.Error("WindowUrl failed: " + ex.Message); }
             return "http://127.0.0.1:" + c.ActivePort + "/";
+        }
+
+        /// <summary>Throttled dsh update check; balloons when a newer version exists.</summary>
+        public void CheckForUpdates()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    string distro = String.Empty;
+                    if (_config.IsWsl || _config.EffectiveInstances.Count > 0)
+                    {
+                        foreach (InstanceConfig inst in _config.EffectiveInstances)
+                        {
+                            if (inst.IsWsl && !String.IsNullOrWhiteSpace(inst.WslDistro)) { distro = inst.WslDistro; break; }
+                        }
+                        if (String.IsNullOrEmpty(distro))
+                        {
+                            string resolved;
+                            if (WslTools.ResolveDistro(_config.WslDistro, _config.LastWslDistro, out resolved)) distro = resolved;
+                        }
+                    }
+                    if (String.IsNullOrEmpty(distro))
+                    {
+                        FileLog.Info("CheckForUpdates: no WSL distro to check; skipping");
+                        return;
+                    }
+                    string latest = UpdateChecker.CheckThrottled(_config, distro);
+                    if (String.IsNullOrEmpty(latest)) return;
+                    var b = Balloon;
+                    if (b != null)
+                        b("dsh web manager", "发现 dsh 新版本 " + latest + "（当前 " + UpdateChecker.GetCurrentWslDshVersion(distro) + "）。可在托盘菜单「更新 dsh」一键更新。");
+                }
+                catch (Exception ex)
+                {
+                    FileLog.Error("CheckForUpdates: " + ex.Message);
+                }
+            });
+        }
+
+        /// <summary>One-click update of the WSL-side global dsh package.</summary>
+        public void ApplyDshUpdate()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    string distro = String.Empty;
+                    string resolved;
+                    if (WslTools.ResolveDistro(_config.WslDistro, _config.LastWslDistro, out resolved)) distro = resolved;
+                    if (String.IsNullOrEmpty(distro)) { Balloon("dsh web manager", "未找到 WSL 发行版，无法更新"); return; }
+                    var b = Balloon;
+                    if (b != null) b("dsh web manager", "正在更新 WSL dsh（npmmirror）…");
+                    bool ok = UpdateChecker.UpdateWslDsh(distro);
+                    if (b != null)
+                        b("dsh web manager", ok ? "dsh 更新完成：" + UpdateChecker.GetCurrentWslDshVersion(distro) : "dsh 更新失败，请查看日志");
+                    _config.LastVersionCheckUtc = String.Empty; // allow an immediate re-check
+                    _config.Save();
+                }
+                catch (Exception ex)
+                {
+                    FileLog.Error("ApplyDshUpdate: " + ex.Message);
+                }
+            });
         }
 
         public void Restart()
