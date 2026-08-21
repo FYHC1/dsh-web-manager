@@ -46,6 +46,20 @@ namespace DshWebManager
                 Application.SetCompatibleTextRenderingDefault(false);
 
                 ManagerConfig config = ManagerConfig.Load();
+
+                // Primary-instance control actions. A control action normally gets
+                // forwarded to an already-running instance; if none is running (we
+                // just acquired the mutex) the action must not turn into a plain
+                // tray start (that used to leave a manager that could never be
+                // stopped by 'exit'). "exit" with no instance means: nothing owned
+                // by us is running, just terminate. Other control actions are
+                // already persisted in config and take effect on this start.
+                if (action.Equals("exit", StringComparison.OrdinalIgnoreCase))
+                {
+                    FileLog.Info("No running instance to exit; terminating immediately.");
+                    return 0;
+                }
+
                 ManagerService service = new ManagerService(config);
                 using (ControlServer server = new ControlServer(service))
                 {

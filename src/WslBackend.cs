@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -24,6 +24,7 @@ namespace DshWebManager
     {
         private readonly ManagerConfig _config;
         private Process _proc;
+        private Process _keepalive;   // persistent wsl.exe client holding the WSL VM alive (systemd mode)
         private string _distro = String.Empty;
         private WslServiceModeKind _mode = WslServiceModeKind.Wrapper;
         private int _lastPort;
@@ -173,7 +174,37 @@ namespace DshWebManager
                 FileLog.Error("WslBackend.StartSystemd: systemctl start failed (user manager running? try: loginctl enable-linger)");
                 return false;
             }
+            // WSL2 shuts the VM down when no wsl.exe client stays connected. systemd
+            // mode only makes short-lived calls, so without a persistent client the VM
+            // would cycle off/on and take the unit down with it. Keep one alive.
+            StartKeepalive();
             return true;
+        }
+
+        private void StartKeepalive()
+        {
+            try
+            {
+                if (_keepalive != null && !_keepalive.HasExited) return;
+                string logOut = Path.Combine(AppPaths.LogDir, "wsl-keepalive.out.log");
+                string logErr = Path.Combine(AppPaths.LogDir, "wsl-keepalive.err.log");
+                _keepalive = WslTools.StartWsl(_distro, "sleep", new string[] { "infinity" }, logOut, logErr);
+                if (_keepalive != null)
+                    FileLog.Info("WslBackend: keepalive wsl.exe client pid=" + _keepalive.Id + " holds the WSL VM alive");
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("WslBackend.StartKeepalive: " + ex.Message);
+            }
+        }
+
+        private void StopKeepalive()
+        {
+            int pid = 0;
+            try { if (_keepalive != null && !_keepalive.HasExited) pid = _keepalive.Id; }
+            catch { }
+            if (pid > 0) DshLauncher.KillTree(pid);
+            _keepalive = null;
         }
 
         private bool StartWrapper(int port, string profile)
@@ -223,6 +254,7 @@ namespace DshWebManager
                 int released = _lastPort;
                 for (int i = 0; i < 10 && WslTools.WslPortOwnerPid(_distro, released) > 0; i++)
                     System.Threading.Thread.Sleep(300);
+                StopKeepalive();
                 _lastPort = 0;
                 return;
             }

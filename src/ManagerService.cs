@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿using System;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -236,6 +236,10 @@ namespace DshWebManager
             {
                 try { _controller.Stop(false); }
                 catch (Exception ex) { FileLog.Error("Exit stop failed: " + ex.Message); }
+                // The service is gone: close the app window it served so no dead
+                // window is left behind after the manager exits.
+                try { EdgeWindow.CloseWindow(_controller.ActivePort); }
+                catch (Exception ex) { FileLog.Error("Exit close window failed: " + ex.Message); }
             }
             _disposed = true;
             // Hard exit: guarantees the tray process terminates even when the UI

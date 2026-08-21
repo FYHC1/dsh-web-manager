@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -115,6 +115,22 @@ namespace DshWebManager
                 return;
             }
             Launch(config, url);
+        }
+
+        /// <summary>Closes the app window for the port (WM_CLOSE), if present.</summary>
+        public static void CloseWindow(int port)
+        {
+            try
+            {
+                IntPtr h = FindAppWindow(port);
+                if (h == IntPtr.Zero) return;
+                Win32.PostMessage(h, 0x0010 /* WM_CLOSE */, IntPtr.Zero, IntPtr.Zero);
+                FileLog.Info("Closing app window (port " + port + ")");
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("CloseWindow failed: " + ex.Message);
+            }
         }
 
         /// <summary>Applies the DSH icon (32px taskbar big / 16px small) to the app window.</summary>
