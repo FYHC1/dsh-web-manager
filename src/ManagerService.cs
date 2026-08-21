@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿﻿﻿﻿using System;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -76,8 +76,14 @@ namespace DshWebManager
             {
                 FileLog.Error("OpenWindow: no usable URL (WSL service not reachable from Windows)");
                 var b = Balloon;
-                if (b != null)
+                if (b == null) return;
+                bool serviceUp = false;
+                try { serviceUp = _controller.Backend.IsServiceUp(_controller.ActivePort); }
+                catch { }
+                if (serviceUp)
                     b("dsh web manager", "WSL 服务在运行，但 localhostForwarding 关闭，Windows 无法访问；请开启 localhostForwarding 或在 WSL 内使用浏览器");
+                else
+                    b("dsh web manager", "WSL 服务未就绪：请检查所选发行版是否正确（配置 wslDistro 或查看托盘「后端」状态）、该发行版内是否安装 dsh");
                 return;
             }
             try

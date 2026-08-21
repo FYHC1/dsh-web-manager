@@ -1,4 +1,4 @@
-﻿﻿﻿using System;
+﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -231,15 +231,42 @@ namespace DshWebManager
             return null;
         }
 
-        /// <summary>Resolves the distro to use: pinned config value or auto-selected.</summary>
-        public static bool ResolveDistro(string configured, out string distro)
+        /// <summary>
+        /// Resolves the distro to use, in priority order:
+        /// configured &gt; last-used (remembered working distro) &gt; running &gt; unique &gt; default &gt; score.
+        /// </summary>
+        public static bool ResolveDistro(string configured, string lastUsed, out string distro)
         {
             distro = null;
             try
             {
                 List<string> detected = DetectDistros();
+                if (detected == null || detected.Count == 0) return false;
+
+                if (!String.IsNullOrWhiteSpace(configured))
+                {
+                    foreach (string item in detected)
+                    {
+                        if (String.Equals(item, configured.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            distro = item;
+                            return true;
+                        }
+                    }
+                }
+                if (!String.IsNullOrWhiteSpace(lastUsed))
+                {
+                    foreach (string item in detected)
+                    {
+                        if (String.Equals(item, lastUsed.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            distro = item;
+                            return true;
+                        }
+                    }
+                }
                 List<WslDistroState> states = DetectDistroStates();
-                distro = SelectPreferredDistro(configured, detected, states);
+                distro = SelectPreferredDistro(null, detected, states);
                 return distro != null;
             }
             catch

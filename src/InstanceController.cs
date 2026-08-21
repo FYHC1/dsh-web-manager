@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Diagnostics;
 
 namespace DshWebManager
@@ -107,6 +107,7 @@ namespace DshWebManager
                     ActivePort = preferred;
                     State = InstanceState.Attached;
                     LastStartedUtc = null;
+                    RememberBackendDistro();
                     FireStatus("已附着现有 dsh 服务 (" + _backend.Describe() + ", port " + preferred + ")");
                     return;
                 }
@@ -301,6 +302,13 @@ namespace DshWebManager
             FileLog.Info("Status: " + text);
             var h = StatusChanged;
             if (h != null) h(text);
+        }
+
+        /// <summary>WSL backend: persist the working distro for auto selection across restarts.</summary>
+        private void RememberBackendDistro()
+        {
+            WslBackend wsl = _backend as WslBackend;
+            if (wsl != null) wsl.RememberDistro();
         }
 
         /// <summary>Backend-aware readiness wait (WSL falls back to the distro socket table).</summary>

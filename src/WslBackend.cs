@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿﻿﻿﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -39,6 +39,16 @@ namespace DshWebManager
 
         public WslServiceModeKind Mode { get { return _mode; } }
 
+        /// <summary>Persists the working distro so auto selection survives a WSL restart.</summary>
+        public void RememberDistro()
+        {
+            if (String.IsNullOrEmpty(_distro)) return;
+            if (String.Equals(_config.LastWslDistro, _distro, StringComparison.OrdinalIgnoreCase)) return;
+            _config.LastWslDistro = _distro;
+            _config.Save();
+            FileLog.Info("WslBackend: remembered working distro " + _distro);
+        }
+
         public string Describe()
         {
             if (String.IsNullOrEmpty(_distro)) return "WSL";
@@ -60,7 +70,7 @@ namespace DshWebManager
             }
             catch { }
             string distro;
-            if (!WslTools.ResolveDistro(_config.WslDistro, out distro))
+            if (!WslTools.ResolveDistro(_config.WslDistro, _config.LastWslDistro, out distro))
             {
                 error = "未找到可用的 WSL 发行版（可在配置 wslDistro 中指定）";
                 return false;
@@ -130,9 +140,17 @@ namespace DshWebManager
                 return false;
             }
             _lastPort = port;
-            if (_mode == WslServiceModeKind.Systemd)
-                return StartSystemd(port, profile);
-            return StartWrapper(port, profile);
+            bool ok = _mode == WslServiceModeKind.Systemd
+                ? StartSystemd(port, profile)
+                : StartWrapper(port, profile);
+            if (ok && !String.Equals(_config.LastWslDistro, _distro, StringComparison.OrdinalIgnoreCase))
+            {
+                // Remember the working distro so auto selection survives a WSL restart
+                // (a stopped default distro must not win over the real one).
+                _config.LastWslDistro = _distro;
+                _config.Save();
+            }
+            return ok;
         }
 
         private bool StartSystemd(int port, string profile)
