@@ -1,4 +1,4 @@
-﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
+﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
 
 > 本文件用途：会话压缩/恢复时读取，重建关键事实与未完成事项。
 > 最后更新：2026-08-21 v2.2 交付后
@@ -50,6 +50,25 @@
 - TaskbarGlomLevel = 2；WSL 侧 `~/.dsh-webui/`（wsl-start.sh + 日志 + pidfile）为 v2.1 运行时产物
 - 测试沙箱：`C:\Users\hgl\AppData\Local\Temp\dwm-sandbox\`（DSH_WEB_MANAGER_HOME 指向它）
 - 编译目录：`C:\Users\hgl\AppData\Local\Temp\dwm-build2\`（旧 dwm-build 被上一会话残留文件污染，勿用）
+
+## 真实故障与修复记录（2026-08-21 同日）
+
+### 故障 1：发行版自动选择选错（FedoraLinux44）
+- 现象：用户关闭 WSL 后重启 manager，dsh 起不来，误报"localhostForwarding 关闭"
+- 根因：WSL 全关时无"运行中"候选，自动选择落到默认标记的 **FedoraLinux44**
+  （不可用镜像发行版：`Failed to start the systemd user session`、`command -v dsh`
+  命中 Windows interop 的 /mnt/c/nvm4w/nodejs/dsh）；forwarding 实际正常
+- 修复：`LastWslDistro` 记忆上次成功（managed/attached）的发行版，选择优先级
+  配置 > 上次成功 > 运行中 > 唯一 > 默认 > 打分；通知文案区分"forwarding 关"与"服务未就绪"
+
+### 故障 2：WSL 冷启动 forwarding 时序竞态
+- 现象：修复后一段时间，manager 突弹"服务未就绪"/"forwarding 关闭"通知，窗口不可用；
+  重启 manager 仍复现
+- 根因：WSL 重启/冷启动后 localhostForwarding 需数秒~数十秒才建立；manager 在
+  forwarding 就绪前判定"关闭"并开空窗/弹通知（WSL 侧 ss 显示服务在跑）
+- 修复：OpenWindow 后台重试 4×5s=20s 宽限（成功即开窗，最终失败才按 IsServiceUp
+  区分通知文案）；StartSystemd 前 WaitSystemdUserReady（探测
+  /run/user/<uid>/systemd/private，最多 30s）
 
 ## 未完成事项
 
