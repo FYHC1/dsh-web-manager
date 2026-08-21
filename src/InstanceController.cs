@@ -59,17 +59,24 @@ namespace DshWebManager
         {
             get
             {
-                string where = BackendDescribe;
+                string where = ShortBackend();
                 switch (State)
                 {
-                    case InstanceState.Managed: return "运行中 (" + where + ", port " + ActivePort + ")" + RuntimeSuffix();
-                    case InstanceState.Attached: return "外部服务 (attached, port " + ActivePort + ")" + RuntimeSuffix();
+                    case InstanceState.Managed: return "运行中 (" + where + ", " + ActivePort + ")" + RuntimeSuffix();
+                    case InstanceState.Attached: return "外部服务 (" + ActivePort + ")" + RuntimeSuffix();
                     case InstanceState.Starting: return "启动中…";
                     case InstanceState.Stopped: return "未运行";
                     case InstanceState.Error: return "错误: " + LastError;
                     default: return State.ToString();
                 }
             }
+        }
+
+        /// <summary>Short backend label for the tray status ("Windows" / "WSL").</summary>
+        private string ShortBackend()
+        {
+            if (_backend == null) return "?";
+            return String.Equals(_backend.BackendType, "wsl", StringComparison.OrdinalIgnoreCase) ? "WSL" : "Windows";
         }
 
         /// <summary>Rich runtime summary from the backend (empty when unavailable).</summary>

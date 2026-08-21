@@ -25,7 +25,33 @@ namespace DshWebManager
         public event Action InstancesChanged;        // raised after add/remove instance (v3.0 P2-2)
 
         public IList<InstanceController> Controllers { get { return _controllers; } }
-        public InstanceController Controller { get { return _controllers.Count > 0 ? _controllers[0] : null; } }
+
+        /// <summary>Active backend ("windows" / "wsl"); remembered across restarts.</summary>
+        public string ActiveBackend
+        {
+            get { return _config.ActiveBackend; }
+            set
+            {
+                if (String.Equals(value, _config.ActiveBackend, StringComparison.OrdinalIgnoreCase)) return;
+                _config.ActiveBackend = value;
+                _config.Save();
+                FileLog.Info("ActiveBackend -> " + value);
+            }
+        }
+
+        /// <summary>Controller for the active backend (fallback: first instance).</summary>
+        public InstanceController ActiveController
+        {
+            get
+            {
+                foreach (InstanceController c in _controllers)
+                    if (String.Equals(c.Backend.BackendType, _config.ActiveBackend, StringComparison.OrdinalIgnoreCase))
+                        return c;
+                return _controllers.Count > 0 ? _controllers[0] : null;
+            }
+        }
+
+        public InstanceController Controller { get { return ActiveController; } }
         public ManagerConfig Config { get { return _config; } }
         public InstanceState State { get { return Controller == null ? InstanceState.Stopped : Controller.State; } }
         public IServiceBackend Backend { get { return Controller == null ? null : Controller.Backend; } }
@@ -132,7 +158,13 @@ namespace DshWebManager
             var h = InstancesChanged; if (h != null) h();
         }
 
-        public void OpenWindow() { OpenWindow(0); }
+        public void OpenWindow()
+        {
+            InstanceController c = ActiveController;
+            if (c == null) return;
+            int index = _controllers.IndexOf(c);
+            OpenWindow(index >= 0 ? index : 0);
+        }
 
         public void OpenWindow(int index)
         {
@@ -322,7 +354,9 @@ namespace DshWebManager
 
         public void Restart()
         {
-            foreach (InstanceController c in _controllers) c.Restart();
+            InstanceController c = ActiveController;
+            if (c == null) return;
+            c.Restart();
             OpenWindowAfterDelay();
         }
 

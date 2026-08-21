@@ -29,7 +29,7 @@ namespace DshWebManager
             Hostname = String.Empty;
         }
 
-        /// <summary>Human-friendly one-line summary, e.g. "dsh 0.1.0-rc.7 · node v24.19.0 · 运行 12m".</summary>
+        /// <summary>Human-friendly one-line summary, e.g. "dsh 0.1.0-rc.7 · 12m" (kept short for the tray).</summary>
         public string Summary
         {
             get
@@ -37,8 +37,7 @@ namespace DshWebManager
                 if (!Reachable) return String.Empty;
                 StringBuilder sb = new StringBuilder();
                 if (!String.IsNullOrEmpty(DshVersion)) sb.Append("dsh ").Append(DshVersion);
-                if (!String.IsNullOrEmpty(Node)) { if (sb.Length > 0) sb.Append(" · "); sb.Append("node ").Append(Node); }
-                if (UptimeMs > 0) { if (sb.Length > 0) sb.Append(" · "); sb.Append("运行 ").Append(BridgeInfoParser.FormatUptime(UptimeMs)); }
+                if (UptimeMs > 0) { if (sb.Length > 0) sb.Append(" · "); sb.Append(BridgeInfoParser.FormatUptime(UptimeMs)); }
                 return sb.ToString();
             }
         }

@@ -26,7 +26,6 @@ namespace DshWebManager
         private static string MenuAutoStart = "\u5f00\u673a\u81ea\u542f";      // 开机自启
         private static string MenuExit = "\u9000\u51fa";                       // 退出
         private static string MenuStatus = "\u72b6\u6001";                     // 状态
-        private static string MenuBackend = "\u540e\u7aef";                    // 后端
         private static string MenuBackendWindows = "Windows \u672c\u673a";     // Windows 本机
         private static string MenuBackendWsl = "WSL";
         private static string MenuWslMode = "WSL \u670d\u52a1\u6a21\u5f0f";       // WSL 服务模式
@@ -59,11 +58,8 @@ namespace DshWebManager
 
             _backendWindowsItem = new ToolStripMenuItem(MenuBackendWindows);
             _backendWslItem = new ToolStripMenuItem(MenuBackendWsl);
-            _backendWindowsItem.Click += delegate { _service.SetBackend("windows"); };
-            _backendWslItem.Click += delegate { _service.SetBackend("wsl"); };
-            ToolStripMenuItem backendMenu = new ToolStripMenuItem(MenuBackend);
-            backendMenu.DropDownItems.Add(_backendWindowsItem);
-            backendMenu.DropDownItems.Add(_backendWslItem);
+            _backendWindowsItem.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); };
+            _backendWslItem.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); };
 
             _modeWrapperItem = new ToolStripMenuItem(MenuWslModeWrapper);
             _modeSystemdItem = new ToolStripMenuItem(MenuWslModeSystemd);
@@ -80,10 +76,12 @@ namespace DshWebManager
             RebuildInstanceMenu();
 
             _menu = new ContextMenuStrip();
+            _menu.Items.Add(_backendWindowsItem);   // 顶部: 激活 Windows 后端
+            _menu.Items.Add(_backendWslItem);        // 顶部: 激活 WSL 后端
+            _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(new ToolStripMenuItem(MenuOpen, null, delegate { _service.OpenWindow(); }));
             _menu.Items.Add(new ToolStripMenuItem(MenuRestart, null, delegate { _service.Restart(); }));
             _menu.Items.Add(_autoStartItem);
-            _menu.Items.Add(backendMenu);
             _menu.Items.Add(modeMenu);
             _menu.Items.Add(_instancesMenu);
             ToolStripMenuItem checkItem = new ToolStripMenuItem(MenuCheckUpdate, null, delegate { _service.CheckForUpdates(); });
@@ -172,7 +170,7 @@ namespace DshWebManager
 
         private void ShowAddInstanceDialog()
         {
-            using (InstanceDialog dlg = new InstanceDialog(null))
+            using (InstanceDialog dlg = new InstanceDialog(null, _service.Config))
             {
                 if (dlg.ShowDialog() == DialogResult.OK && dlg.Result != null)
                     _service.AddInstance(dlg.Result);
@@ -223,10 +221,10 @@ namespace DshWebManager
         {
             try
             {
-                bool wsl = _service.Config.IsWsl;
+                bool wsl = String.Equals(_service.ActiveBackend, "wsl", StringComparison.OrdinalIgnoreCase);
                 if (_backendWslItem != null) _backendWslItem.Checked = wsl;
                 if (_backendWindowsItem != null) _backendWindowsItem.Checked = !wsl;
-                bool systemd = _service.Config.IsWsl
+                bool systemd = wsl
                     && String.Equals(_service.Config.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
                 if (_modeSystemdItem != null) _modeSystemdItem.Checked = systemd;
                 if (_modeWrapperItem != null) _modeWrapperItem.Checked = !systemd;
@@ -278,6 +276,7 @@ namespace DshWebManager
             private readonly TextBox _wslPort;
             private readonly ComboBox _wslDistro;
             private readonly ComboBox _mode;
+            private readonly TableLayoutPanel _table;
             public InstanceConfig Result { get; private set; }
 
             /// <summary>One selectable WSL distro entry ("" = auto-detect).</summary>
@@ -287,14 +286,13 @@ namespace DshWebManager
                 public override string ToString() { return String.IsNullOrEmpty(Name) ? "(自动)" : Name; }
             }
 
-            public InstanceDialog(InstanceConfig existing)
+            public InstanceDialog(InstanceConfig existing, ManagerConfig config)
             {
                 Text = MenuAddInstance;
                 FormBorderStyle = FormBorderStyle.FixedDialog;
                 MaximizeBox = false;
                 MinimizeBox = false;
                 StartPosition = FormStartPosition.CenterScreen;
-                ClientSize = new Size(400, 360);
 
                 _id = new TextBox();
                 _profile = new TextBox();
@@ -304,12 +302,31 @@ namespace DshWebManager
                 _wslDistro = new ComboBox();
                 _mode = new ComboBox();
 
-                _id.Text = existing == null ? "wsl2" : existing.Id;
+                // Default ports continue after the highest existing port of that backend.
+                int defWin = 3081, defWsl = 3080;
+                if (config != null)
+                {
+                    if (config.Instances != null && config.Instances.Count > 0)
+                    {
+                        foreach (InstanceConfig inst in config.Instances)
+                        {
+                            if (inst.IsWsl) { if (inst.WslPort >= defWsl) defWsl = inst.WslPort + 1; }
+                            else { if (inst.Port >= defWin) defWin = inst.Port + 1; }
+                        }
+                    }
+                    else
+                    {
+                        defWin = config.Port + 1;
+                        defWsl = config.WslPort + 1;
+                    }
+                }
+
+                _id.Text = existing == null ? "new" : existing.Id;
                 _profile.Text = existing == null ? "web" : existing.Profile;
-                _port.Text = existing == null ? "3082" : existing.Port.ToString();
+                _port.Text = (existing == null ? defWin : existing.Port).ToString();
                 _backend.Items.AddRange(new object[] { "windows", "wsl" });
                 _backend.SelectedIndex = existing != null && existing.IsWsl ? 1 : 0;
-                _wslPort.Text = existing == null ? "3080" : existing.WslPort.ToString();
+                _wslPort.Text = (existing == null ? defWsl : existing.WslPort).ToString();
                 _mode.Items.AddRange(new object[] { "wrapper", "systemd" });
                 _mode.SelectedIndex = existing != null && String.Equals(existing.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
 
@@ -332,8 +349,7 @@ namespace DshWebManager
                 catch { }
                 _wslDistro.SelectedIndex = distroSelect;
 
-                // Buttons: fixed size in a bottom panel. (A Dock=Fill button inside a
-                // TableLayoutPanel cell rendered invisibly on some DPI/theme setups.)
+                // Buttons: fixed size in a bottom panel.
                 Button ok = new Button();
                 ok.Text = "确定";
                 ok.DialogResult = DialogResult.OK;
@@ -350,27 +366,61 @@ namespace DshWebManager
                 buttons.Controls.Add(ok);
                 buttons.Controls.Add(cancel);
 
-                TableLayoutPanel table = new TableLayoutPanel();
-                table.ColumnCount = 2;
-                table.RowCount = 7;
-                table.Dock = DockStyle.Fill;
-                table.Padding = new Padding(12);
-                table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
-                table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
+                _table = new TableLayoutPanel();
+                _table.ColumnCount = 2;
+                _table.RowCount = 7;
+                _table.Dock = DockStyle.Fill;
+                _table.Padding = new Padding(12);
+                _table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+                _table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
+                for (int i = 0; i < 7; i++)
+                    _table.RowStyles.Add(new RowStyle(SizeType.AutoSize, 0));
 
-                AddRow(table, 0, "实例 Id", _id);
-                AddRow(table, 1, "后端", _backend);
-                AddRow(table, 2, "Profile", _profile);
-                AddRow(table, 3, "端口 (Windows)", _port);
-                AddRow(table, 4, "端口 (WSL)", _wslPort);
-                AddRow(table, 5, "WSL 发行版", _wslDistro);
-                AddRow(table, 6, "WSL 模式", _mode);
+                AddRow(_table, 0, "实例 Id", _id);
+                AddRow(_table, 1, "后端", _backend);
+                AddRow(_table, 2, "Profile", _profile);
+                AddRow(_table, 3, "端口 (Windows)", _port);
+                AddRow(_table, 4, "端口 (WSL)", _wslPort);
+                AddRow(_table, 5, "WSL 发行版", _wslDistro);
+                AddRow(_table, 6, "WSL 模式", _mode);
 
                 Controls.Add(buttons);   // dock Bottom first
-                Controls.Add(table);     // Fill takes the remaining space
+                Controls.Add(_table);    // Fill takes the remaining space
+
+                _backend.SelectedIndexChanged += delegate { UpdateVisibility(); };
+                UpdateVisibility();
 
                 AcceptButton = ok;
                 CancelButton = cancel;
+            }
+
+            /// <summary>Show only the fields relevant to the selected backend.</summary>
+            private void UpdateVisibility()
+            {
+                bool wsl = _backend.SelectedIndex == 1;
+                SetRowVisible(3, !wsl); // Windows port
+                SetRowVisible(4, wsl);  // WSL port
+                SetRowVisible(5, wsl);  // WSL distro
+                SetRowVisible(6, wsl);  // WSL mode
+                ClientSize = new Size(400, wsl ? 340 : 230);
+            }
+
+            private void SetRowVisible(int row, bool visible)
+            {
+                if (visible)
+                {
+                    _table.RowStyles[row].SizeType = SizeType.AutoSize;
+                    _table.RowStyles[row].Height = 0;
+                }
+                else
+                {
+                    _table.RowStyles[row].SizeType = SizeType.Absolute;
+                    _table.RowStyles[row].Height = 0;
+                }
+                Control l = _table.GetControlFromPosition(0, row);
+                Control i = _table.GetControlFromPosition(1, row);
+                if (l != null) l.Visible = visible;
+                if (i != null) i.Visible = visible;
             }
 
             private static void AddRow(TableLayoutPanel table, int row, string label, Control input)
@@ -388,31 +438,35 @@ namespace DshWebManager
             {
                 if (DialogResult == DialogResult.OK)
                 {
-                    int p, wp;
+                    bool wsl = _backend.SelectedIndex == 1;
                     if (String.IsNullOrWhiteSpace(_id.Text))
                     {
                         MessageBox.Show("实例 Id 不能为空");
                         e.Cancel = true;
                         return;
                     }
-                    if (!int.TryParse(_port.Text, out p) || p <= 0)
+                    int winPort, wslPort;
+                    if (!int.TryParse(_port.Text, out winPort) || winPort <= 0) winPort = 3081;
+                    if (!int.TryParse(_wslPort.Text, out wslPort) || wslPort <= 0) wslPort = 3080;
+                    // Validate the active backend's port specifically.
+                    if (wsl && wslPort <= 0)
                     {
-                        MessageBox.Show("端口 (Windows) 必须是正整数");
+                        MessageBox.Show("端口 (WSL) 必须是正整数");
                         e.Cancel = true;
                         return;
                     }
-                    if (!int.TryParse(_wslPort.Text, out wp) || wp <= 0)
+                    if (!wsl && winPort <= 0)
                     {
-                        MessageBox.Show("端口 (WSL) 必须是正整数");
+                        MessageBox.Show("端口 (Windows) 必须是正整数");
                         e.Cancel = true;
                         return;
                     }
                     Result = new InstanceConfig();
                     Result.Id = _id.Text.Trim();
                     Result.Profile = _profile.Text.Trim();
-                    Result.BackendType = _backend.SelectedItem == null ? "windows" : _backend.SelectedItem.ToString();
-                    Result.Port = p;
-                    Result.WslPort = wp;
+                    Result.BackendType = wsl ? "wsl" : "windows";
+                    Result.Port = winPort;
+                    Result.WslPort = wslPort;
                     DistroItem chosen = _wslDistro.SelectedItem as DistroItem;
                     Result.WslDistro = chosen == null ? String.Empty : chosen.Name;
                     Result.WslServiceMode = _mode.SelectedItem == null ? "wrapper" : _mode.SelectedItem.ToString();
