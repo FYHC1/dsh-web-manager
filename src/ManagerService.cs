@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Threading;
 using System.Collections.Generic;
 using System.Windows.Forms;
@@ -14,7 +14,7 @@ namespace DshWebManager
         private readonly ManagerConfig _config;
         private readonly List<InstanceController> _controllers = new List<InstanceController>();
         private readonly System.Threading.Timer _timer;
-        private bool _hadWindow;
+        private readonly Dictionary<InstanceController, bool> _hadWindows = new Dictionary<InstanceController, bool>();
         private DateTime _lastSizeCapture = DateTime.MinValue;
         private bool _disposed;
 
@@ -105,7 +105,7 @@ namespace DshWebManager
             try
             {
                 EdgeWindow.EnsureVisible(_config, url, c.ActivePort);
-                _hadWindow = true;
+                _hadWindows[c] = true;
             }
             catch (Exception ex)
             {
@@ -139,7 +139,7 @@ namespace DshWebManager
                     if (!String.IsNullOrEmpty(url))
                     {
                         EdgeWindow.EnsureVisible(_config, url, c.ActivePort);
-                        _hadWindow = true;
+                        _hadWindows[c] = true;
                         FileLog.Info("OpenWindow: retry succeeded after ~" + ((attempt + 1) * 5) + "s");
                         return;
                     }
@@ -331,41 +331,46 @@ namespace DshWebManager
             Environment.Exit(0);
         }
 
+        /// <summary>Per-instance window icon application and close-window detection.</summary>
+        private void HandleInstanceWindow(InstanceController c)
+        {
+            int port = c.ActivePort;
+            if (c.State == InstanceState.Managed || c.State == InstanceState.Attached)
+                EdgeWindow.ApplyIconToWindow(port);
+
+            bool hasWindow = EdgeWindow.FindAppWindow(port) != IntPtr.Zero;
+            bool had;
+            _hadWindows.TryGetValue(c, out had);
+            if (had && !hasWindow)
+            {
+                FileLog.Info("App window closed (port " + port + ")");
+                if (_config.CloseStopsService && c.State == InstanceState.Managed)
+                {
+                    c.Stop(false);
+                    var b = Balloon; if (b != null) b("dsh web manager", "窗口已关闭，服务已停止");
+                }
+                // Default: service keeps running; tray can re-open the window anytime.
+            }
+            _hadWindows[c] = hasWindow;
+        }
+
         private void Tick(object state)
         {
             if (_disposed) return;
             try
             {
-                foreach (InstanceController c in _controllers) c.Tick();
-
-                // Window handling for the first controller (single-window UX for now;
-                // multi-instance window management can extend this per instance).
-                InstanceController c0 = Controller;
-                if (c0 == null) return;
-                int port = c0.ActivePort;
-                // Icon: re-apply continuously so transient Edge icon changes are overridden.
-                if (c0.State == InstanceState.Managed || c0.State == InstanceState.Attached)
-                    EdgeWindow.ApplyIconToWindow(port);
-
-                // Window presence edge detection (close-window semantics).
-                bool hasWindow = EdgeWindow.FindAppWindow(port) != IntPtr.Zero;
-                if (_hadWindow && !hasWindow)
+                foreach (InstanceController c in _controllers)
                 {
-                    FileLog.Info("App window closed (port " + port + ")");
-                    if (_config.CloseStopsService && c0.State == InstanceState.Managed)
-                    {
-                        c0.Stop(false);
-                        var b = Balloon; if (b != null) b("dsh web manager", "窗口已关闭，服务已停止");
-                    }
-                    // Default: service keeps running; tray can re-open the window anytime.
+                    c.Tick();
+                    HandleInstanceWindow(c);
                 }
-                _hadWindow = hasWindow;
 
-                // Size capture every ~2 s.
+                // Size capture every ~2 s for every instance.
                 if (DateTime.Now.Subtract(_lastSizeCapture).TotalSeconds >= 2)
                 {
                     _lastSizeCapture = DateTime.Now;
-                    EdgeWindow.CaptureSize(port, _config, DateTime.Now);
+                    foreach (InstanceController c in _controllers)
+                        EdgeWindow.CaptureSize(c.ActivePort, c.Instance.Window, delegate { _config.Save(); }, DateTime.Now);
                 }
             }
             catch (Exception ex)

@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -214,8 +214,13 @@ namespace DshWebManager
         }
 
         /// <summary>Captures window size/position into config (throttled) and persists on change.</summary>
-        public static void CaptureSize(int port, ManagerConfig config, DateTime now)
+        /// <summary>
+        /// Captures window size/position into the given WindowConfig (throttled by the
+        /// caller) and invokes onChanged when the geometry actually changed.
+        /// </summary>
+        public static void CaptureSize(int port, WindowConfig window, Action onChanged, DateTime now)
         {
+            if (window == null) return;
             IntPtr h = FindAppWindow(port);
             if (h == IntPtr.Zero) return;
             Win32.RECT r;
@@ -224,11 +229,11 @@ namespace DshWebManager
             if (r.Width < 200 || r.Height < 150) return; // ignore minimized/emerging windows
             string size = r.Width + "x" + r.Height;
             string pos = r.Left + "," + r.Top;
-            if (config.Window.Size != size || config.Window.Position != pos)
+            if (window.Size != size || window.Position != pos)
             {
-                config.Window.Size = size;
-                config.Window.Position = pos;
-                config.Save();
+                window.Size = size;
+                window.Position = pos;
+                if (onChanged != null) onChanged();
                 FileLog.Info("Window geometry saved: size=" + size + " pos=" + pos);
             }
         }
