@@ -1,4 +1,4 @@
-﻿﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -19,6 +19,9 @@ namespace DshWebManager
         private static readonly Guid PkeyAppUserModelFmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
         private const uint PidAppUserModelId = 5;
         private const uint PidRelaunchIcon = 2;
+        private static List<EdgeProcInfo> _procCache;                 // cached msedge pid->cmdline snapshot
+        private static DateTime _procCacheAt = DateTime.MinValue;
+        private static readonly TimeSpan ProcCacheTtl = TimeSpan.FromSeconds(2);
 
         public static string FindEdgeExe()
         {
@@ -57,6 +60,57 @@ namespace DshWebManager
             Process.Start(psi);
         }
 
+        /// <summary>One msedge/chrome process snapshot (pid + command line).</summary>
+        private sealed class EdgeProcInfo
+        {
+            public uint Pid;
+            public string CommandLine;
+        }
+
+        /// <summary>
+        /// Cached snapshot of Edge/Chrome processes (pid + command line). The command
+        /// line is read via WMI, which is slow and can occasionally hang or throw when
+        /// the WMI service is busy; caching the snapshot for 2 s collapses the per-tick
+        /// lookups into one query, and the EnumerationOptions timeout bounds a stuck call.
+        /// </summary>
+        private static List<EdgeProcInfo> GetEdgeProcesses()
+        {
+            if (_procCache != null && DateTime.Now.Subtract(_procCacheAt) < ProcCacheTtl)
+                return _procCache;
+            List<EdgeProcInfo> result = new List<EdgeProcInfo>();
+            try
+            {
+                EnumerationOptions opts = new EnumerationOptions();
+                opts.Timeout = TimeSpan.FromSeconds(3);
+                using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(
+                    "root\\cimv2",
+                    "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'msedge.exe' OR Name = 'chrome.exe'",
+                    opts))
+                {
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        object cv = obj["CommandLine"];
+                        object pv = obj["ProcessId"];
+                        if (cv == null || pv == null) continue;
+                        uint pidv;
+                        if (!uint.TryParse(pv.ToString(), out pidv)) continue;
+                        EdgeProcInfo info = new EdgeProcInfo();
+                        info.Pid = pidv;
+                        info.CommandLine = cv.ToString();
+                        result.Add(info);
+                    }
+                }
+                _procCache = result;
+                _procCacheAt = DateTime.Now;
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("GetEdgeProcesses failed: " + ex.Message);
+                if (_procCache != null) return _procCache; // degrade to the last snapshot
+            }
+            return result;
+        }
+
         /// <summary>
         /// Finds the Edge/Chrome app window serving exactly this port. Strictly scoped:
         /// command line must contain "--app=" and ":PORT" and must NOT contain "--type="
@@ -67,34 +121,25 @@ namespace DshWebManager
             try
             {
                 string needle = ":" + port;
-                using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(
-                    "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'msedge.exe' OR Name = 'chrome.exe'"))
+                List<uint> pids = new List<uint>();
+                foreach (EdgeProcInfo info in GetEdgeProcesses())
                 {
-                    List<uint> pids = new List<uint>();
-                    foreach (ManagementObject obj in searcher.Get())
+                    if (info.CommandLine.IndexOf("--type=", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (info.CommandLine.IndexOf("--app=", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    if (info.CommandLine.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    pids.Add(info.Pid);
+                }
+                foreach (uint pid in pids)
+                {
+                    try
                     {
-                        object cv = obj["CommandLine"];
-                        if (cv == null) continue;
-                        string cmd = cv.ToString();
-                        if (cmd.IndexOf("--type=", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                        if (cmd.IndexOf("--app=", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                        if (cmd.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                        object pv = obj["ProcessId"];
-                        uint pidv;
-                        if (pv != null && uint.TryParse(pv.ToString(), out pidv)) pids.Add(pidv);
-                    }
-                    foreach (uint pid in pids)
-                    {
-                        try
+                        using (Process proc = Process.GetProcessById((int)pid))
                         {
-                            using (Process proc = Process.GetProcessById((int)pid))
-                            {
-                                if (proc.MainWindowHandle != IntPtr.Zero)
-                                    return proc.MainWindowHandle;
-                            }
+                            if (proc.MainWindowHandle != IntPtr.Zero)
+                                return proc.MainWindowHandle;
                         }
-                        catch { }
                     }
+                    catch { }
                 }
             }
             catch (Exception ex)
