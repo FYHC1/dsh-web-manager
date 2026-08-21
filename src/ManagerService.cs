@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿using System;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -69,21 +69,18 @@ namespace DshWebManager
             OpenWindowCore();
         }
 
+        private const int WindowRetryMax = 4;   // 5 s apart -> ~20 s grace for WSL cold start
+
         private void OpenWindowCore()
         {
             string url = WindowUrl();
             if (String.IsNullOrEmpty(url))
             {
-                FileLog.Error("OpenWindow: no usable URL (WSL service not reachable from Windows)");
-                var b = Balloon;
-                if (b == null) return;
-                bool serviceUp = false;
-                try { serviceUp = _controller.Backend.IsServiceUp(_controller.ActivePort); }
-                catch { }
-                if (serviceUp)
-                    b("dsh web manager", "WSL 服务在运行，但 localhostForwarding 关闭，Windows 无法访问；请开启 localhostForwarding 或在 WSL 内使用浏览器");
-                else
-                    b("dsh web manager", "WSL 服务未就绪：请检查所选发行版是否正确（配置 wslDistro 或查看托盘「后端」状态）、该发行版内是否安装 dsh");
+                // WSL may be cold-starting: localhost forwarding can take several
+                // seconds (or longer) to come up after the distro boots. Retry in
+                // the background before declaring the service unreachable.
+                FileLog.Info("OpenWindow: URL not ready, scheduling retries (WSL cold start?)");
+                ScheduleWindowRetry(0);
                 return;
             }
             try
@@ -96,6 +93,45 @@ namespace DshWebManager
                 FileLog.Error("OpenWindow failed: " + ex.Message);
                 var b = Balloon; if (b != null) b("dsh web manager", "打开窗口失败: " + ex.Message);
             }
+        }
+
+        private void ScheduleWindowRetry(int attempt)
+        {
+            if (attempt >= WindowRetryMax)
+            {
+                FileLog.Error("OpenWindow: no usable URL after " + WindowRetryMax + " retries");
+                var b = Balloon;
+                if (b == null) return;
+                bool serviceUp = false;
+                try { serviceUp = _controller.Backend.IsServiceUp(_controller.ActivePort); }
+                catch { }
+                if (serviceUp)
+                    b("dsh web manager", "WSL 服务在运行，但 localhostForwarding 关闭，Windows 无法访问；请开启 localhostForwarding 或在 WSL 内使用浏览器");
+                else
+                    b("dsh web manager", "WSL 服务未就绪：请检查所选发行版是否正确（配置 wslDistro 或查看托盘「后端」状态）、该发行版内是否安装 dsh");
+                return;
+            }
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                Thread.Sleep(5000);
+                try
+                {
+                    string url = WindowUrl();
+                    if (!String.IsNullOrEmpty(url))
+                    {
+                        EdgeWindow.EnsureVisible(_config, url, _controller.ActivePort);
+                        _hadWindow = true;
+                        FileLog.Info("OpenWindow: retry succeeded after ~" + ((attempt + 1) * 5) + "s");
+                        return;
+                    }
+                    ScheduleWindowRetry(attempt + 1);
+                }
+                catch (Exception ex)
+                {
+                    FileLog.Error("OpenWindow retry failed: " + ex.Message);
+                    ScheduleWindowRetry(attempt + 1);
+                }
+            });
         }
 
         /// <summary>Window URL for the active backend/port (empty = not reachable from Windows).</summary>

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -530,6 +530,29 @@ namespace DshWebManager
                 FileLog.Error("EnsureWslScript: " + ex.Message);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Waits until the systemd --user manager socket is up (WSL cold start takes
+        /// a while before the user session is ready).
+        /// </summary>
+        public static bool WaitSystemdUserReady(string distro, int timeoutMs)
+        {
+            if (String.IsNullOrWhiteSpace(distro)) return false;
+            string uid = String.Empty;
+            CommandResult id = RunCapture(distro, "id", new string[] { "-u" }, 8000);
+            if (id.ExitCode == 0) uid = (id.StandardOutput ?? String.Empty).Trim();
+            if (String.IsNullOrEmpty(uid)) return false;
+            string socket = "/run/user/" + uid + "/systemd/private";
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (DateTime.UtcNow < deadline)
+            {
+                CommandResult r = RunCapture(distro, "test", new string[] { "-S", socket }, 8000);
+                if (r.ExitCode == 0) return true;
+                System.Threading.Thread.Sleep(1000);
+            }
+            FileLog.Error("WaitSystemdUserReady: user manager socket not ready in " + distro);
+            return false;
         }
 
         /// <summary>True when the distro was booted with systemd as init (v3.0).</summary>

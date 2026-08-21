@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -161,6 +161,11 @@ namespace DshWebManager
                 return false;
             }
             string unit = "dsh-web-" + port + ".service";
+            if (!WslTools.WaitSystemdUserReady(_distro, 30000))
+            {
+                FileLog.Error("WslBackend.StartSystemd: systemd user session not ready in " + _distro);
+                return false;
+            }
             WslTools.Systemctl(_distro, "daemon-reload", String.Empty);
             FileLog.Info("WslBackend: systemctl --user start " + unit + " (" + Describe() + ")");
             if (!WslTools.Systemctl(_distro, "start", unit))
