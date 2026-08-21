@@ -12,6 +12,7 @@
   "BackendType": "windows",
   "WslPort": 3080,
   "WslDistro": "",
+  "WslServiceMode": "wrapper",
   "Profile": "web",
   "Version": "2.1.0"
 }

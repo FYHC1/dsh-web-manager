@@ -1,4 +1,4 @@
-# v2.1 / v3.0 实现计划（dsh web manager）
+﻿# v2.1 / v3.0 实现计划（dsh web manager）
 
 > 最终决策记录（截至 2026-08-21 会话）：
 > 语言 C#/.NET Framework 4.8 + WinForms；新仓库 FYHC1/dsh-web-manager 独立交付；
@@ -56,11 +56,17 @@
 
 ## v3.0：systemd 托管 + 多实例 + 更新机制
 
-1. **WSL 内 systemd 用户/系统服务托管 dsh**
-   - `/etc/wsl.conf` 开 `[boot] systemd=true`（需一次性 `wsl --shutdown`，实施前与用户确认）
-   - systemd unit：Restart=on-failure 自愈、journald 日志、随 WSL 启动自动拉起
-   - fnm node PATH/env 用 wrapper 脚本包一层
-   - EXE 只做 `wsl.exe -e systemctl --user start/stop/restart dsh-web` 编排
+1. **WSL 内 systemd 用户服务托管 dsh** ✅ 代码层已交付（2026-08-21，W–Z 矩阵）
+   - `/etc/wsl.conf` 开 `[boot] systemd=true` —— **本机 FedoraLinux 已启用**（PID 1=systemd），
+     无需 wsl --shutdown；若在未启用的发行版使用：改 wsl.conf 后需一次性 `wsl --shutdown`
+   - systemd unit：`~/.config/systemd/user/dsh-web-<port>.service`（Type=simple /
+     Restart=on-failure / RestartSec=3 / journald 日志 / WantedBy=default.target 随登录拉起）
+   - `wsl-systemd-start.sh`：前台 exec dsh（fnm/toolchain bootstrap 一层）
+   - EXE 编排：`systemctl --user start/stop daemon-reload`（XDG_RUNTIME_DIR 经 id -u 拼接）
+   - `WslServiceMode` 配置（wrapper|systemd）+ 托盘「WSL 服务模式」子菜单 + `wslmode` 管道动作；
+     systemd 不可用自动回退 wrapper（不破坏现有功能）
+   - 遗留：`systemctl --user` 依赖登录会话的 user manager；无登录会话的发行版需
+     `loginctl enable-linger`（记入交付说明）
 
 2. **多实例（Windows + WSL 两端同时配置运行）**
    - `Instances` 数组：每实例独立端口/状态/生命周期（配置模型预留）

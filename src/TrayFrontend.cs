@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -14,6 +14,8 @@ namespace DshWebManager
         private readonly ToolStripMenuItem _autoStartItem;
         private readonly ToolStripMenuItem _backendWindowsItem;
         private readonly ToolStripMenuItem _backendWslItem;
+        private readonly ToolStripMenuItem _modeWrapperItem;
+        private readonly ToolStripMenuItem _modeSystemdItem;
         private bool _closing;
 
         private static string MenuOpen = "\u6253\u5f00\u7a97\u53e3";            // 打开窗口
@@ -24,6 +26,9 @@ namespace DshWebManager
         private static string MenuBackend = "\u540e\u7aef";                    // 后端
         private static string MenuBackendWindows = "Windows \u672c\u673a";     // Windows 本机
         private static string MenuBackendWsl = "WSL";
+        private static string MenuWslMode = "WSL \u670d\u52a1\u6a21\u5f0f";       // WSL 服务模式
+        private static string MenuWslModeWrapper = "wrapper (\u81ea\u6108\u811a\u672c)";  // wrapper (自愈脚本)
+        private static string MenuWslModeSystemd = "systemd (unit)";
         private static string Title = "dsh web manager";
 
         public TrayFrontend(ManagerService service)
@@ -51,6 +56,15 @@ namespace DshWebManager
             ToolStripMenuItem backendMenu = new ToolStripMenuItem(MenuBackend);
             backendMenu.DropDownItems.Add(_backendWindowsItem);
             backendMenu.DropDownItems.Add(_backendWslItem);
+
+            _modeWrapperItem = new ToolStripMenuItem(MenuWslModeWrapper);
+            _modeSystemdItem = new ToolStripMenuItem(MenuWslModeSystemd);
+            _modeWrapperItem.Click += delegate { _service.SetWslMode("wrapper"); };
+            _modeSystemdItem.Click += delegate { _service.SetWslMode("systemd"); };
+            ToolStripMenuItem modeMenu = new ToolStripMenuItem(MenuWslMode);
+            modeMenu.DropDownItems.Add(_modeWrapperItem);
+            modeMenu.DropDownItems.Add(_modeSystemdItem);
+
             RefreshBackendCheck();
 
             _menu = new ContextMenuStrip();
@@ -58,6 +72,7 @@ namespace DshWebManager
             _menu.Items.Add(new ToolStripMenuItem(MenuRestart, null, delegate { _service.Restart(); }));
             _menu.Items.Add(_autoStartItem);
             _menu.Items.Add(backendMenu);
+            _menu.Items.Add(modeMenu);
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(_statusItem);
             _menu.Items.Add(new ToolStripSeparator());
@@ -113,6 +128,10 @@ namespace DshWebManager
                 bool wsl = _service.Config.IsWsl;
                 if (_backendWslItem != null) _backendWslItem.Checked = wsl;
                 if (_backendWindowsItem != null) _backendWindowsItem.Checked = !wsl;
+                bool systemd = _service.Config.IsWsl
+                    && String.Equals(_service.Config.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
+                if (_modeSystemdItem != null) _modeSystemdItem.Checked = systemd;
+                if (_modeWrapperItem != null) _modeWrapperItem.Checked = !systemd;
             }
             catch { }
         }

@@ -1,4 +1,4 @@
-# 验证矩阵（v2.0 + v2.1 真机实测记录）
+﻿# 验证矩阵（v2.0 + v2.1 真机实测记录）
 
 测试机：Windows 11 22H2 + WSL2（FedoraLinux 运行中 / FedoraLinux44 默认但 Stopped）
 dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm/.../dsh`
@@ -46,6 +46,20 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | U | 墙钟超时 | WSL 后端启动失败等待超时 | ✅ WaitReadyBackend 改用墙钟截止（修复前按迭代计数，WSL 探测每轮 ~1.5s 导致实际超时 ~2min） |
 | V | dsh 安全限制 | `--host 0.0.0.0` | ✅ **dsh 主动拒绝**（"intentionally not supported yet for safety"，防 RCE 暴露）→ v2.2 放弃 0.0.0.0/WSL-IP 方案，forwarding 关闭时 GetWindowUrl 返回空串 + 托盘提示，不做无谓的 URL 回退 |
 
+## v3.0 systemd 矩阵（代码层交付）— 2026-08-21 实测
+
+> 关键前提：**本机 FedoraLinux 的 /etc/wsl.conf 已含 [boot] systemd=true**（PID 1=systemd），
+> 因此 systemd 模式可完整真机验证，**无需 wsl --shutdown**。
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| W | systemd 托管启动 | WslServiceMode=systemd + WSL 后端 3095 | ✅ 探测到 systemd → unit dsh-web-3095.service active (running)，Main PID = 3095 监听者；unit 生成到 ~/.config/systemd/user/（%h/ExecStart 正确） |
+| X | systemd 崩溃自愈 | `kill -9` dsh 进程 | ✅ systemd `Scheduled restart job, restart counter at 1` → 3s 拉起（Restart=on-failure/RestartSec=3）；journald 完整记录（wsl-systemd-start.sh 输出入 journal） |
+| Y | systemd 停服 | `exe exit` | ✅ `systemctl --user stop` → unit inactive (dead)、端口释放 |
+| Z | 模式热切换 | systemd ⇄ wrapper（wslmode 管道） | ✅ 双向切换正常；systemctl stop 后等待端口释放，端口保持 3095 不顺延 |
+| AA | systemd 不可用回退 | （本机 systemd 可用，未触发） | 代码路径：SystemdAvailable=false 时回退 wrapper + 日志提示，不破坏现有功能 |
+| BB | wrapper 回归 | 切回 wrapper 模式 | ✅ 服务正常、窗口正常 |
+
 ## 关键发现与修复（开发过程记录）
 
 - `dsh web` 是错误用法；正确语法为 `dsh --profile <profile> [--host 127.0.0.1] --port <port>`。
@@ -73,3 +87,10 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
   把实际超时拉长数倍 → 一律用墙钟截止。
 - **Error/Starting 状态的清理**：后端已拉起 wrapper 但启动失败（如 profile 不存在）时，
   Stop/Exit 必须仍调用 backend.Stop() 清理 wsl.exe/脚本，否则残留进程继续空转。
+- **本机 systemd 早已启用**：FedoraLinux 的 /etc/wsl.conf 含 `[boot] systemd=true`（PID 1=systemd），
+  v3.0 systemd 托管无需 wsl --shutdown；`systemctl --user` 直接可用（WSL 登录会话提供 user manager）。
+- **systemctl stop 是异步的**：停服后端口需短暂释放，紧跟的 Start 会误判占用而顺延端口
+  → Stop 后轮询 WslPortOwnerPid 归零（最多 3s）再返回。
+- **systemd unit 生成**：manager 物化 wsl-systemd-start.sh（前台 exec dsh）+ 写
+  ~/.config/systemd/user/dsh-web-<port>.service（Type=simple / Restart=on-failure /
+  journald 日志），文件写入不依赖 systemd 运行，可在启用前预置。

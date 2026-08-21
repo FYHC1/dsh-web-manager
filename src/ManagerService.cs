@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -104,6 +104,33 @@ namespace DshWebManager
         {
             _controller.Restart();
             OpenWindowAfterDelay();
+        }
+
+        /// <summary>Switches the WSL service mode (wrapper/systemd) and restarts the WSL instance.</summary>
+        public void SetWslMode(string mode)
+        {
+            if (!String.Equals(mode, "wrapper", StringComparison.OrdinalIgnoreCase)
+                && !String.Equals(mode, "systemd", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (!_config.IsWsl)
+            {
+                Balloon("dsh web manager", "请先切换到 WSL 后端");
+                return;
+            }
+            if (String.Equals(mode, _config.WslServiceMode, StringComparison.OrdinalIgnoreCase))
+            {
+                Balloon("dsh web manager", "服务模式已是 " + mode);
+                return;
+            }
+            bool hadWindow = EdgeWindow.FindAppWindow(_controller.ActivePort) != IntPtr.Zero;
+            try { _controller.Stop(true); }
+            catch (Exception ex) { FileLog.Error("SetWslMode stop failed: " + ex.Message); }
+            _config.WslServiceMode = mode.ToLowerInvariant();
+            _config.Save();
+            _controller.Reconfigure();
+            _controller.Start();
+            if (hadWindow) OpenWindowAfterDelay();
+            Balloon("dsh web manager", "WSL 服务模式已切换: " + mode);
         }
 
         /// <summary>Switches the service backend (windows/wsl) and restarts the instance.</summary>

@@ -1,4 +1,4 @@
-# dsh web manager
+﻿# dsh web manager
 
 Windows 侧常驻托盘的 **DeepSeek Harness WebUI 管理器**：负责启动 dsh web、拉起 Edge 应用窗口、守护服务进程、常驻系统托盘，并接管窗口图标与窗口尺寸记忆。
 
@@ -47,6 +47,10 @@ powershell -ExecutionPolicy Bypass -File scripts\Install.ps1
 - **健康探测**：Windows 端口探测 + WSL 侧 `ss` 解析双通道 —— 即使 localhostForwarding
   关闭，守护/状态也不误判（dsh 出于安全拒绝 `--host 0.0.0.0`，故服务只绑 127.0.0.1，
   forwarding 关闭时 Windows 无法访问，打开窗口会给出明确提示）
+- **systemd 托管（v3.0）**：托盘「后端 → WSL 服务模式 → systemd」或 `wslmode systemd`。
+  管理器生成 `~/.config/systemd/user/dsh-web-<port>.service`（Restart=on-failure 自愈、
+  journald 日志、随登录拉起），前台运行 dsh；`systemd` 不可用（未开
+  `/etc/wsl.conf [boot] systemd=true`）时自动回退 wrapper 模式。
 - **双向互装**：`wsl-bootstrap.sh`（WSL→Windows）检测 manager 未运行则静默拉起，
   未安装则经共享目录 `~/.dsh-webui/wsl-bootstrap/Install.ps1` 静默安装；
   安装器会把 WSL 伴侣脚本物化进默认发行版（bootstrap.lock 先到先得防竞态）
@@ -69,6 +73,7 @@ powershell -ExecutionPolicy Bypass -File scripts\Install.ps1
 | `BackendType` | `windows` / `wsl` | `windows` |
 | `WslPort` | WSL 后端首选端口 | `3080` |
 | `WslDistro` | 指定 WSL 发行版（留空自动） | `""` |
+| `WslServiceMode` | WSL 服务模式：`wrapper`（自愈脚本）/ `systemd`（unit） | `wrapper` |
 | `Profile` | dsh profile 名 | `web` |
 | `Window.Size` / `Window.Position` | 记忆的窗口尺寸与位置 | 空（Edge 默认） |
 
@@ -88,7 +93,8 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 - **v2.2**：后端感知健康探测（forwarding 关闭时守护不误判）+ 窗口 URL 策略（不可达时提示
   而非打开打不开的窗口）+ Error/Starting 残留清理 + 可中断 sleep + 墙钟超时 ✅ 已交付，
   R–V 真机矩阵通过
-- **v3.0**：Runtime Bridge 插件（权威状态/优雅停止）、多实例（两端同开）、更新机制、设置界面
+- **v3.0（进行中）**：systemd 托管（WslServiceMode + unit 生成 + 托盘/管道切换，W–Z 矩阵）✅
+  已交付；剩余：Runtime Bridge 插件（权威状态/优雅停止）、多实例（两端同开）、更新机制
 
 ## 许可
 

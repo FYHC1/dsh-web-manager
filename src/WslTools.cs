@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -505,6 +505,78 @@ namespace DshWebManager
             }
         }
 
+        /// <summary>True when the distro was booted with systemd as init (v3.0).</summary>
+        public static bool SystemdAvailable(string distro)
+        {
+            if (String.IsNullOrWhiteSpace(distro)) return false;
+            // /run/systemd/system exists only when systemd is PID 1 (no shell metacharacters).
+            CommandResult r = RunCapture(distro, "bash", new string[] { "-lc", "test -d /run/systemd/system && echo YES || echo NO" }, 10000);
+            return r.ExitCode == 0 && (r.StandardOutput ?? String.Empty).Trim().Contains("YES");
+        }
+
+        /// <summary>
+        /// Runs a systemctl --user action. XDG_RUNTIME_DIR is resolved via id -u and
+        /// prefixed as a plain assignment (no shell metacharacters -> safe through wsl.exe).
+        /// </summary>
+        public static bool Systemctl(string distro, string action, string unitName)
+        {
+            if (String.IsNullOrWhiteSpace(distro) || String.IsNullOrWhiteSpace(unitName)) return false;
+            string uid = String.Empty;
+            CommandResult id = RunCapture(distro, "id", new string[] { "-u" }, 8000);
+            if (id.ExitCode == 0) uid = (id.StandardOutput ?? String.Empty).Trim();
+            string prefix = String.IsNullOrEmpty(uid) ? String.Empty : "XDG_RUNTIME_DIR=/run/user/" + uid + " ";
+            CommandResult r = RunCapture(distro, "bash",
+                new string[] { "-lc", prefix + "systemctl --user " + action + " " + unitName + " 2>&1" }, 15000);
+            if (r.ExitCode != 0)
+                FileLog.Error("systemctl --user " + action + " " + unitName + " failed: " + (r.StandardOutput ?? r.StandardError ?? String.Empty).Trim());
+            return r.ExitCode == 0;
+        }
+
+        /// <summary>
+        /// v3.0: materializes wsl-systemd-start.sh and the systemd user unit for
+        /// profile+port into ~/.config/systemd/user/. Writing files does not require
+        /// systemd to be running, so this works even before /etc/wsl.conf is enabled.
+        /// </summary>
+        public static bool EnsureSystemdFiles(string distro, string profile, int port)
+        {
+            try
+            {
+                string shared = Path.Combine(AppPaths.SharedDir, "wsl-systemd-start.sh");
+                File.WriteAllText(shared, WslSystemdStartScript.Replace("\r\n", "\n"), new UTF8Encoding(false));
+                string wslPath = ConvertToWslPath(distro, shared);
+
+                string unitName = "dsh-web-" + port + ".service";
+                string unitContent = "[Unit]\n"
+                    + "Description=DeepSeek Harness WebUI (dsh web manager) - profile " + profile + " port " + port + "\n"
+                    + "After=network.target\n\n"
+                    + "[Service]\n"
+                    + "Type=simple\n"
+                    + "ExecStart=%h/.dsh-webui/wsl-systemd-start.sh " + profile + " " + port + "\n"
+                    + "Restart=on-failure\n"
+                    + "RestartSec=3\n"
+                    + "Environment=HOME=%h\n\n"
+                    + "[Install]\n"
+                    + "WantedBy=default.target\n";
+                string unitShared = Path.Combine(AppPaths.SharedDir, "systemd", unitName);
+                Directory.CreateDirectory(Path.GetDirectoryName(unitShared));
+                File.WriteAllText(unitShared, unitContent.Replace("\r\n", "\n"), new UTF8Encoding(false));
+                string unitWsl = ConvertToWslPath(distro, unitShared);
+
+                string cmd = "mkdir -p ~/.dsh-webui ~/.config/systemd/user && cp -f " + BashQuote(wslPath)
+                    + " ~/.dsh-webui/wsl-systemd-start.sh && chmod +x ~/.dsh-webui/wsl-systemd-start.sh && cp -f "
+                    + BashQuote(unitWsl) + " ~/.config/systemd/user/" + unitName;
+                CommandResult r = RunCapture(distro, "bash", new string[] { "-lc", cmd }, 30000);
+                if (r.ExitCode != 0)
+                    FileLog.Error("EnsureSystemdFiles failed: " + (r.StandardError ?? String.Empty).Trim());
+                return r.ExitCode == 0;
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("EnsureSystemdFiles: " + ex.Message);
+                return false;
+            }
+        }
+
         /// <summary>
         /// WSL-side dsh launcher: self-healing loop + pidfile + TERM handling.
         /// Kept as a C# constant so the manager can (re)materialize it at will;
@@ -590,5 +662,43 @@ while true; do
   fi
 done
 ";
+
+        /// <summary>
+        /// WSL-side systemd ExecStart wrapper (foreground dsh; systemd tracks/heals it).
+        /// Also shipped as scripts/wsl/wsl-systemd-start.sh for the installer.
+        /// </summary>
+        public const string WslSystemdStartScript =
+@"#!/usr/bin/env bash
+# dsh web manager v3.0 - systemd ExecStart wrapper (foreground).
+# systemd tracks the dsh process directly and Restart=on-failure heals it;
+# logs go to journald (journalctl --user -u dsh-web-<port>).
+# Usage: wsl-systemd-start.sh <profile> <port>
+set -u
+
+PROFILE=""${1:-web}""
+PORT=""${2:-3080}""
+HOST=""127.0.0.1""
+
+# --- toolchain bootstrap (best effort, same as wsl-start.sh) ---
+if ! command -v dsh >/dev/null 2>&1; then
+  export PATH=""$HOME/.local/bin:$HOME/bin:$PATH""
+  if command -v fnm >/dev/null 2>&1; then
+    eval ""$(fnm env --use-on-cd 2>/dev/null)"" || true
+  fi
+  if ! command -v dsh >/dev/null 2>&1; then
+    FNM_ROOT=""$HOME/.local/share/fnm/node-versions""
+    LATEST=""$(ls -1 ""$FNM_ROOT"" 2>/dev/null | sort -V | tail -1)""
+    [ -n ""$LATEST"" ] && export PATH=""$FNM_ROOT/$LATEST/installation/bin:$PATH""
+  fi
+fi
+if ! command -v dsh >/dev/null 2>&1; then
+  echo ""ERROR: dsh not found in distro"" >&2
+  exit 2
+fi
+
+exec dsh --profile ""$PROFILE"" --host ""$HOST"" --port ""$PORT""
+";
+
+
     }
 }

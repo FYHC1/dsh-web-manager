@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.IO;
 using System.IO.Pipes;
 using System.Security.Principal;
@@ -117,6 +117,8 @@ namespace DshWebManager
                     _service.Restart();
                 else if (action.StartsWith("backend ", StringComparison.OrdinalIgnoreCase))
                     _service.SetBackend(action.Substring("backend ".Length).Trim());
+                else if (action.StartsWith("wslmode ", StringComparison.OrdinalIgnoreCase))
+                    _service.SetWslMode(action.Substring("wslmode ".Length).Trim());
             }
             catch (Exception ex)
             {

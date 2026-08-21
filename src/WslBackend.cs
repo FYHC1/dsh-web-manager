@@ -1,24 +1,32 @@
-﻿using System;
+﻿﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
 
 namespace DshWebManager
 {
+    public enum WslServiceModeKind
+    {
+        Wrapper,   // v2.1: wsl-start.sh self-heal loop via wsl.exe
+        Systemd    // v3.0: systemd --user unit running dsh in the foreground
+    }
+
     /// <summary>
-    /// v2.1: hosts dsh web inside a WSL distro through wsl.exe.
-    ///   launch : wsl.exe -d &lt;distro&gt; -- bash -lc '~/.dsh-webui/wsl-start.sh &lt;profile&gt; &lt;port&gt;'
-    /// The wsl.exe client process tracks the Linux command while it runs; the script
-    /// itself self-heals (restart loop) and writes a pidfile. Stop() first asks the
-    /// distro to kill the script (TERM), then force-kills the wsl.exe tree.
-    /// Ownership: manager-launched = managed; a dsh already serving the port = attached
-    /// (monitored, never killed).
+    /// Hosts dsh web inside a WSL distro, in one of two service modes:
+    ///   Wrapper (v2.1): wsl.exe -d &lt;distro&gt; -- bash -lc '~/.dsh-webui/wsl-start.sh ...'
+    ///     - the wsl.exe client tracks the script; script self-heals + writes a pidfile
+    ///   Systemd (v3.0): systemd --user unit dsh-web-&lt;port&gt;.service
+    ///     - dsh runs in the foreground, systemd Restart=on-failure heals it, journald logs
+    /// The requested mode falls back to Wrapper when systemd is not available (no wsl --shutdown yet).
+    /// Ownership: manager-launched = managed; an external dsh already serving the port = attached.
     /// </summary>
     public sealed class WslBackend : IServiceBackend
     {
         private readonly ManagerConfig _config;
         private Process _proc;
         private string _distro = String.Empty;
+        private WslServiceModeKind _mode = WslServiceModeKind.Wrapper;
+        private int _lastPort;
 
         public WslBackend(ManagerConfig config)
         {
@@ -29,9 +37,14 @@ namespace DshWebManager
 
         public string Distro { get { return _distro; } }
 
+        public WslServiceModeKind Mode { get { return _mode; } }
+
         public string Describe()
         {
-            return String.IsNullOrEmpty(_distro) ? "WSL" : "WSL (" + _distro + ")";
+            if (String.IsNullOrEmpty(_distro)) return "WSL";
+            return _mode == WslServiceModeKind.Systemd
+                ? "WSL (" + _distro + ", systemd)"
+                : "WSL (" + _distro + ")";
         }
 
         public bool IsAvailable(out string error)
@@ -53,13 +66,33 @@ namespace DshWebManager
                 return false;
             }
             _distro = distro;
+            ResolveMode();
             return true;
+        }
+
+        /// <summary>
+        /// Picks the service mode: requested "systemd" when the distro is actually
+        /// booted with systemd, otherwise falls back to the wrapper (never breaks).
+        /// </summary>
+        private void ResolveMode()
+        {
+            bool wantSystemd = String.Equals(_config.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
+            if (wantSystemd && WslTools.SystemdAvailable(_distro))
+            {
+                _mode = WslServiceModeKind.Systemd;
+                return;
+            }
+            if (wantSystemd)
+                FileLog.Error("WslBackend: systemd requested but not available in " + _distro
+                    + " (enable [boot] systemd in /etc/wsl.conf, then wsl --shutdown); falling back to wrapper");
+            _mode = WslServiceModeKind.Wrapper;
         }
 
         public int ManagedPid
         {
             get
             {
+                if (_mode == WslServiceModeKind.Systemd) return 0; // systemd owns the dsh process
                 try { return _proc != null && !_proc.HasExited ? _proc.Id : 0; }
                 catch { return 0; }
             }
@@ -91,12 +124,42 @@ namespace DshWebManager
                     return false;
                 }
             }
+            if (profile.IndexOfAny(new char[] { ' ', '\t' }) >= 0)
+            {
+                FileLog.Error("WslBackend.Start: profile with spaces is not supported in WSL mode: " + profile);
+                return false;
+            }
+            _lastPort = port;
+            if (_mode == WslServiceModeKind.Systemd)
+                return StartSystemd(port, profile);
+            return StartWrapper(port, profile);
+        }
+
+        private bool StartSystemd(int port, string profile)
+        {
+            if (!WslTools.EnsureSystemdFiles(_distro, profile, port))
+            {
+                FileLog.Error("WslBackend.StartSystemd: failed to write unit files");
+                return false;
+            }
+            string unit = "dsh-web-" + port + ".service";
+            WslTools.Systemctl(_distro, "daemon-reload", String.Empty);
+            FileLog.Info("WslBackend: systemctl --user start " + unit + " (" + Describe() + ")");
+            if (!WslTools.Systemctl(_distro, "start", unit))
+            {
+                FileLog.Error("WslBackend.StartSystemd: systemctl start failed (user manager running? try: loginctl enable-linger)");
+                return false;
+            }
+            return true;
+        }
+
+        private bool StartWrapper(int port, string profile)
+        {
             if (!WslTools.EnsureWslScript(_distro))
             {
                 FileLog.Error("WslBackend.Start: failed to materialize wsl-start.sh in " + _distro);
                 return false;
             }
-
             string cmd = "~/.dsh-webui/wsl-start.sh " + WslTools.BashQuote(profile) + " " + port;
             string logOut = Path.Combine(AppPaths.LogDir, "wsl-dsh.out.log");
             string logErr = Path.Combine(AppPaths.LogDir, "wsl-dsh.err.log");
@@ -113,12 +176,26 @@ namespace DshWebManager
 
         public bool IsWrapperAlive()
         {
+            if (_mode == WslServiceModeKind.Systemd) return true; // systemd heals; heartbeat waits instead of fighting
             try { return _proc != null && !_proc.HasExited; }
             catch { return false; }
         }
 
         public void Stop()
         {
+            if (_mode == WslServiceModeKind.Systemd)
+            {
+                string unit = "dsh-web-" + _lastPort + ".service";
+                FileLog.Info("WslBackend: systemctl --user stop " + unit);
+                WslTools.Systemctl(_distro, "stop", unit);
+                // systemctl stop is asynchronous: wait until the port is actually
+                // released so an immediate follow-up start reuses the same port.
+                int released = _lastPort;
+                for (int i = 0; i < 10 && WslTools.WslPortOwnerPid(_distro, released) > 0; i++)
+                    System.Threading.Thread.Sleep(300);
+                _lastPort = 0;
+                return;
+            }
             if (!String.IsNullOrEmpty(_distro))
             {
                 // Ask the distro to stop the launcher script (TERM -> cleanup -> exit).
