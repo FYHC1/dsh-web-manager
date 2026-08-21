@@ -64,9 +64,11 @@ namespace DshWebManager
 
             ProcessStartInfo psi = new ProcessStartInfo();
             psi.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-            // Classic cmd quoting:  cmd /d /s /c ""<path>\dsh.cmd" --profile ... --port N"
+            // Classic cmd quoting:  cmd /d /s /c ""<path>\dsh.cmd" --profile ... --port N --no-open"
+            // --no-open: dsh web opens the default browser by default; the manager opens
+            // its own standalone --app window, so suppress dsh's browser launch.
             psi.Arguments = "/d /s /c \"\"" + dsh + "\" --profile " + profile
-                + " --host 127.0.0.1 --port " + port + "\"";
+                + " --host 127.0.0.1 --port " + port + " --no-open\"";
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
             psi.WindowStyle = ProcessWindowStyle.Hidden;
