@@ -41,7 +41,7 @@ namespace DshWebManager
         private static string MenuUpdateDsh = "\u66f4\u65b0 dsh";                // 更新 dsh
         private static string MenuAddInstance = "\u6dfb\u52a0\u5b9e\u4f8b";       // 添加实例
         private static string MenuRemoveInstance = "\u5220\u9664\u5b9e\u4f8b";    // 删除实例
-        private static string MenuCloseWindow = "\u5173\u95ed\u7a97\u53e3";        // 关闭窗口
+        private static string MenuCloseInstance = "\u5173\u95ed\u5b9e\u4f8b";        // 关闭实例
         private static string MenuDefaultBackend = "\u9ed8\u8ba4\u542f\u52a8\u540e\u7aef";  // 默认启动后端
         private static string Title = "dsh web manager";
 
@@ -195,15 +195,20 @@ namespace DshWebManager
             catch (Exception ex) { FileLog.Error("RestartInstance window: " + ex.Message); }
         }
 
-        private void CloseInstanceWindow(int index)
+        private void CloseInstance(int index)
         {
             InstanceController c = _service.GetController(index);
             if (c == null) return;
             try
             {
+                c.Stop(false); // stop the service (managed: full stop; attached: detach)
+            }
+            catch (Exception ex) { FileLog.Error("CloseInstance stop: " + ex.Message); }
+            try
+            {
                 EdgeWindow.CloseWindow(c.ActivePort);
             }
-            catch (Exception ex) { FileLog.Error("CloseInstanceWindow: " + ex.Message); }
+            catch (Exception ex) { FileLog.Error("CloseInstance window: " + ex.Message); }
         }
 
         /// <summary>Rebuilds the instance submenu from the live controller list (v3.0 P2-2).</summary>
@@ -219,7 +224,7 @@ namespace DshWebManager
                 ToolStripMenuItem item = new ToolStripMenuItem(InstanceLabel(ic));
                 ToolStripMenuItem openItem = new ToolStripMenuItem(MenuOpen, null, delegate { _service.OpenWindow(idx); });
                 ToolStripMenuItem restartItem = new ToolStripMenuItem(MenuRestart, null, delegate { RestartInstance(idx); });
-                ToolStripMenuItem closeItem = new ToolStripMenuItem(MenuCloseWindow, null, delegate { CloseInstanceWindow(idx); });
+                ToolStripMenuItem closeItem = new ToolStripMenuItem(MenuCloseInstance, null, delegate { CloseInstance(idx); });
                 ToolStripMenuItem statusItem = new ToolStripMenuItem(MenuStatus + ": " + ic.StatusText);
                 statusItem.Enabled = false;
                 item.DropDownItems.Add(openItem);
