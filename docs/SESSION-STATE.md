@@ -1,17 +1,26 @@
-﻿﻿﻿﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
+﻿﻿﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
 
 > 本文件用途：会话压缩/恢复时读取，重建关键事实与未完成事项。
-> 最后更新：2026-08-21 v2.2 交付后
+> 最后更新：2026-08-22 v3.0 P1–P2 全部交付 + 浏览器标签根因修复后
 
 ## 项目现状
 
 - **v2.0**：Windows 后端全量交付（托盘/窗口/图标/尺寸/守护/配置/日志/迁移），A–I 矩阵通过。
 - **v2.1**：WSL 后端交付（J–Q 矩阵），commit 0998cbc。
-- **v2.2**：forwarding 感知 + 生命周期清理（R–V 矩阵），commit 待推送。
+- **v2.2**：forwarding 感知 + 生命周期清理（R–V 矩阵）。
   - `IsServiceUp`：Windows 探测 + WSL `ss` 双通道（forwarding 关闭守护不误判）
   - `GetWindowUrl`：WSL 不可达返回空串 → 托盘提示（**dsh 拒绝 --host 0.0.0.0**，放弃 WSL-IP 回退）
   - Stop/Restart 清理 Error/Starting 残留 wrapper；wsl-start.sh 可中断 sleep；WaitReady 墙钟
-  - 用户 manager 已于本会话采纳新 exe 并重启（见「当前环境状态」）
+- **v3.0**：systemd 托管 + Runtime Bridge + 多实例 + 更新机制（W–OO 矩阵）。
+- **v3.0 P1**：Runtime Bridge 状态接入托盘（P1-2）+ Windows 侧 Runtime Bridge（P1-3）。
+- **v3.0 P2**：FindAppWindow WMI 卡死修复（P2-1）+ 添加/删除实例托盘 UI（P2-2）。
+- **P2 后续 UI 优化**：顶部横向 Windows/WSL 激活按钮（记忆后端）+ 状态两行 +
+  端口全局独占 + 实例「关闭窗口」+ 每实例独立浏览器 profile + 菜单底部锚定 + 浅色主题美化 +
+  **默认启动后端**（manager open 时拉起指定后端窗口，并关闭其他实例残留窗口）。
+- **浏览器标签页根因（重要）**：dsh web 启动时**默认调用系统浏览器打开 URL**
+  （日志 `opening the default browser; pass --no-open to disable`），这是"关闭后又冒浏览器标签"
+  的真正根因——不是 manager 的 Launch。三处启动命令（Windows / wsl-start.sh /
+  wsl-systemd-start.sh）已统一加 `--no-open`，验证 `dsh-web.out.log` 该行 0 次。
 
 ## 用户原始诉求（任务栏图标，已闭环）
 

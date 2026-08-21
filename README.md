@@ -155,6 +155,15 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
   更新机制（24h 节流版本检查 + 托盘一键更新）✅ 已交付
 - **v3.0 P1–P2 增强**：Runtime Bridge 状态接入托盘（dsh/node 版本、运行时长显示；检查更新联动）+
   Windows 侧 Runtime Bridge + 多实例「添加/删除实例」托盘 UI + FindAppWindow WMI 卡死修复 ✅ 已交付
+- **v3.0 P2 后续（UI 优化）**：托盘顶部横向 Windows/WSL 激活按钮（记忆当前后端）+
+  状态项两行显示（运行中 / 未启动·未知版本）+ 端口跨后端全局独占 +
+  实例菜单「关闭窗口」+ 每实例独立浏览器 profile（多实例窗口不再合并）+
+  菜单底部锚定（切换后端只伸缩顶部）+ 面板美化（浅色主题）✅ 已交付
+- **浏览器标签页根因修复**：dsh web 启动时默认调用系统浏览器打开 URL（日志提示
+  `pass --no-open to disable`）→ 三处启动命令统一加 `--no-open`（Windows / wsl-start.sh /
+  wsl-systemd-start.sh），浏览器不再冒 dsh 标签，只保留 manager 拉起的独立 `--app` 窗口 ✅ 已修复
+- **默认启动后端**：托盘「默认启动后端」子菜单（Windows 本机 / WSL）决定 manager 以
+  `open` 启动时拉起的后端窗口；启动时自动关闭其他实例的残留窗口 ✅ 已交付
 
 ## 许可
 

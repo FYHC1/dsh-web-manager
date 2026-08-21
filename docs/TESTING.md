@@ -146,3 +146,17 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 |---|------|------|------|
 | PP | FindAppWindow 卡死（P2-1） | exit 时 `CloseWindow` 曾卡在 WMI（"调用已取消"） | ✅ msedge 进程快照缓存（TTL 2s）+ `EnumerationOptions.Timeout=3s` + 失败降级上次快照；exit 不再挂死 |
 | QQ | 添加实例对话框（P2-2） | 打开「添加实例」 | ✅ 修复确认按钮不可见（改为底部固定尺寸面板）+ WSL 发行版下拉（自动探测真实发行版） |
+
+## P2 后续 UI/根因修复矩阵 — 2026-08-21/22 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| RR | 顶部横向切换按钮 | 托盘顶部 Windows/WSL 并排按钮 | ✅ 横向排布（ToolStripControlHost）；选中蓝色高亮；切换后「WSL 服务模式」项按后端显隐 |
+| SS | 菜单底部锚定 | 打开菜单 + 切换后端（WSL 模式项显隐致高度变化） | ✅ 底部固定在屏幕底/托盘图标，只有顶部伸缩 |
+| TT | 状态两行 | 运行中 / 未运行分别查看 | ✅ 运行中=「运行中 (WSL, 3080)」+「dsh 0.1.0-rc.7 · 12m」；未运行=「未启动」+「未知版本」；高度稳定不跳动 |
+| UU | 端口全局独占 | 添加实例默认端口 + 手动填已有端口 | ✅ 默认端口=全局最大已用+1(+2)；`AddInstance` 校验跨后端重复端口并拒绝 |
+| VV | 实例「关闭窗口」 | 实例子菜单「关闭窗口」 | ✅ `EdgeWindow.CloseWindow` 只关该实例窗口（WM_CLOSE），不停服务 |
+| WW | 每实例独立 profile | 多实例各开窗口 | ✅ `--user-data-dir` 按端口后缀（`dsh-web-manager-browser-3081`），窗口不合并 |
+| XX | FindAppWindow 只匹配独立窗口 | 打开窗口（存在旧无后缀残留窗口时） | ✅ 额外要求 dataDir 带 `-端口"` 后缀，旧共享 profile 残留窗口不再被误匹配恢复 |
+| YY | 默认启动后端 | 「默认启动后端」选 WSL → 重启 manager（open） | ✅ 只 Launch WSL 独立窗口；启动时自动关闭其他实例残留窗口（不再出现 Windows 独立窗口） |
+| ZZ | **浏览器标签根因** | 启动 dsh 实例 | ✅ **dsh web 默认调用系统浏览器打开 URL**（日志 `opening the default browser; pass --no-open to disable`）→ 三处启动命令加 `--no-open` 后，`dsh-web.out.log` 该行 0 次，浏览器不再冒标签，只有独立 `--app` 窗口 |
