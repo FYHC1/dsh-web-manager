@@ -116,6 +116,25 @@ insert 与手拷目录，避免出现两套桥（双桥会抢同一个 `DSH_BRID
 （config 的 `BridgeToken`，首次自动生成）、`DSH_PROFILE`、`DSH_WEB_PORT`。
 托盘状态随之显示 `运行中 (…) · dsh <版本> · node <版本> · 运行 <时长>`。
 
+## 桌面快捷方式与托盘共享（自动）
+
+插件 `apply()` 时（dsh web 每次启动）会**幂等**地做两件事：
+
+1. **确保共享托盘**：若 `%LOCALAPPDATA%\dsh-web-manager\app\dsh-web-manager.exe`
+   已存在则直接复用（共用同一个托盘，不再装第二份）；否则把随包的
+   `dist/dsh-web-manager.exe` + 图标拷贝过去。用户配置/状态在
+   `%USERPROFILE%\.dsh-webui\`，不会被覆盖。
+2. **创建/修正桌面快捷方式**（按安装平台区分）：
+   - Windows 端 dsh 安装 → `DeepSeek Harness WebUI (win).lnk` → 管理器 `open windows`
+   - WSL 端 dsh 安装 → Windows 桌面 `DeepSeek Harness WebUI (wsl).lnk` → 管理器 `open wsl`
+
+   快捷方式目标都是同一个共享托盘 exe；若发现旧版遗留的 `wscript.exe`/`.vbs`
+   快捷方式（dsh-webui-installer 时代产物）会自动替换为指向托盘的新快捷方式。
+
+管理器新增控制动作 `open windows` / `open wsl`（`dsh-web-manager.exe open windows`
+或 `open wsl`）：打开指定后端的窗口，与快捷方式一致。双击快捷方式时若托盘未运行会
+先冷启动托盘（并附着/启动各实例），再打开对应后端窗口；若托盘已在运行则直接转发。
+
 ## 更新机制（v3.0）
 
 托盘「更新」菜单：

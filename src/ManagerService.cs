@@ -87,7 +87,11 @@ namespace DshWebManager
             _config.MigrateLegacyWindowSize();
             _config.Save();
             foreach (InstanceController c in _controllers) c.Start();
-            if (String.Equals(action, "open", StringComparison.OrdinalIgnoreCase))
+            if (String.Equals(action, "open windows", StringComparison.OrdinalIgnoreCase))
+                OpenBackendWindow("windows");
+            else if (String.Equals(action, "open wsl", StringComparison.OrdinalIgnoreCase))
+                OpenBackendWindow("wsl");
+            else if (String.Equals(action, "open", StringComparison.OrdinalIgnoreCase))
                 OpenDefaultBackendWindow();
             _timer.Change(0, 1000);
             // v3.0: throttled dsh update check in the background (24 h).
@@ -210,6 +214,19 @@ namespace DshWebManager
                 if (String.Equals(c.Backend.BackendType, backend, StringComparison.OrdinalIgnoreCase))
                     return c;
             return null;
+        }
+
+        /// <summary>Opens the window of one specific backend ("windows" / "wsl").</summary>
+        public void OpenBackendWindow(string backend)
+        {
+            InstanceController c = GetControllerForBackend(backend);
+            if (c == null)
+            {
+                Balloon("dsh web manager", "未找到后端: " + backend);
+                return;
+            }
+            int index = _controllers.IndexOf(c);
+            OpenWindow(index >= 0 ? index : 0);
         }
 
         public void OpenWindow()

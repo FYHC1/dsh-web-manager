@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿using System;
 using System.IO;
 using System.IO.Pipes;
 using System.Security.Principal;
@@ -109,6 +109,10 @@ namespace DshWebManager
             {
                 if (action.Equals("open", StringComparison.OrdinalIgnoreCase))
                     _service.OpenWindow();
+                else if (action.Equals("open windows", StringComparison.OrdinalIgnoreCase))
+                    _service.OpenBackendWindow("windows");
+                else if (action.Equals("open wsl", StringComparison.OrdinalIgnoreCase))
+                    _service.OpenBackendWindow("wsl");
                 else if (action.Equals("tray", StringComparison.OrdinalIgnoreCase))
                     { /* keep tray only: no-op */ }
                 else if (action.Equals("exit", StringComparison.OrdinalIgnoreCase))
