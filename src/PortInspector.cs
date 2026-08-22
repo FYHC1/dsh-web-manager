@@ -14,15 +14,26 @@ namespace DshWebManager
     /// <summary>Port listening checks and listener-process identification.</summary>
     public static class PortInspector
     {
-        /// <summary>True when something listens on 127.0.0.1:port (or 0.0.0.0/::).</summary>
+        /// <summary>True when something listens on 127.0.0.1:port (or 0.0.0.0/::),
+        /// also trying the IPv6 loopback so a [::1]-only (or dual-stack) listener
+        /// is not missed. A plain connect probe has no side effects on an HTTP
+        /// server; WSL ports without localhost forwarding are covered by the
+        /// backend's WslPortOwnerPid fallback.</summary>
         public static bool IsListening(int port)
+        {
+            if (IsListeningOn("127.0.0.1", port)) return true;
+            return IsListeningOn("::1", port);
+        }
+
+        private static bool IsListeningOn(string address, int port)
         {
             try
             {
                 using (TcpClient client = new TcpClient())
                 {
-                    IAsyncResult ar = client.BeginConnect("127.0.0.1", port, null, null);
-                    if (!ar.AsyncWaitHandle.WaitOne(300)) return false;
+                    IAsyncResult ar = client.BeginConnect(address, port, null, null);
+                    if (!ar.AsyncWaitHandle.WaitOne(400)) return false;
+                    if (!client.Connected) return false;
                     client.EndConnect(ar);
                     return client.Connected;
                 }

@@ -15,7 +15,8 @@ namespace DshWebManager
         private static IntPtr _bigIcon;
         private static IntPtr _smallIcon;
         private static string _iconSource = String.Empty;
-        private static IntPtr _lastAumidHwnd = IntPtr.Zero;
+        private static readonly System.Collections.Generic.Dictionary<int, IntPtr> _aumidHwnds =
+            new System.Collections.Generic.Dictionary<int, IntPtr>(); // port -> last handled hwnd
         private static readonly Guid PkeyAppUserModelFmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
         private const uint PidAppUserModelId = 5;
         private const uint PidRelaunchIcon = 2;
@@ -270,10 +271,22 @@ namespace DshWebManager
         // ------------------------------------------------------------------
         private static readonly object _hookSync = new object();
         private static Win32.WinEventDelegate _hookDelegate;   // strong ref: a collected delegate kills the hook
-        private static System.Collections.Generic.HashSet<uint> _hookPids;
-        private static WindowConfig _hookGeom;
-        private static DateTime _hookArmedAt = DateTime.MinValue;
+        private static readonly System.Collections.Generic.List<GeometryJob> _hookJobs =
+            new System.Collections.Generic.List<GeometryJob>();
         private static readonly TimeSpan HookMaxArmed = TimeSpan.FromSeconds(20);
+
+        /// <summary>One armed launch: the port, its remembered geometry and the set
+        /// of browser processes that may create the window (profile processes +
+        /// the launched forwarder). Multiple launches (e.g. Windows and WSL opening
+        /// almost simultaneously) each get their own job - the hook stays armed
+        /// until every job has been applied or expired.</summary>
+        private sealed class GeometryJob
+        {
+            public int Port;
+            public DateTime ArmedAt = DateTime.Now;
+            public WindowConfig Geom;
+            public System.Collections.Generic.HashSet<uint> Pids = new System.Collections.Generic.HashSet<uint>();
+        }
 
         /// <summary>Starts the hook for one launch. Pid set = every CURRENT
         /// browser process of the per-port profile (covers the preheated warm
@@ -283,47 +296,54 @@ namespace DshWebManager
         {
             try
             {
+                bool startThread = false;
                 lock (_hookSync)
                 {
-                    _hookGeom = geom;
-                    _hookPids = new System.Collections.Generic.HashSet<uint>();
+                    GeometryJob job = new GeometryJob();
+                    job.Port = port;
+                    job.Geom = geom;
                     string needle = "-" + port + "\"";
                     foreach (EdgeProcInfo info in GetEdgeProcesses())
                     {
                         if (info.CommandLine.IndexOf("--type=", StringComparison.OrdinalIgnoreCase) >= 0) continue;
                         if (info.CommandLine.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                        _hookPids.Add(info.Pid);
+                        job.Pids.Add(info.Pid);
                     }
                     if (_hookDelegate == null) _hookDelegate = OnGeometryWinEvent;
-                    _hookArmedAt = DateTime.Now;
+                    _hookJobs.Add(job);
+                    if (_hookJobs.Count == 1) startThread = true;
                 }
-                System.Threading.Thread t = new System.Threading.Thread(HookMessageLoop);
-                t.IsBackground = true;
-                t.Name = "EdgeGeometryHook";
-                t.Start();
+                if (startThread)
+                {
+                    System.Threading.Thread t = new System.Threading.Thread(HookMessageLoop);
+                    t.IsBackground = true;
+                    t.Name = "EdgeGeometryHook";
+                    t.Start();
+                }
                 FileLog.Info("GeometryHook: armed for port " + port);
             }
             catch (Exception ex) { FileLog.Error("GeometryHook arm: " + ex.Message); }
         }
 
-        /// <summary>Adds the just-launched forwarder process to the watched set.</summary>
+        /// <summary>Adds the just-launched forwarder process to the watched set
+        /// (the most recent job - it belongs to the launch that just happened).</summary>
         public static void NoteLaunchedPid(int pid)
         {
             if (pid <= 0) return;
             lock (_hookSync)
             {
-                if (_hookPids != null) _hookPids.Add((uint)pid);
+                if (_hookJobs.Count > 0) _hookJobs[_hookJobs.Count - 1].Pids.Add((uint)pid);
             }
         }
 
-        /// <summary>Clears the armed state; the pump thread notices within a
-        /// second and unhooks. Idempotent and thread-safe.</summary>
-        public static void DisarmGeometryHook()
+        /// <summary>Removes one port's armed job; the pump thread notices within
+        /// a second and unhooks when no job is left. Idempotent/thread-safe.</summary>
+        public static void DisarmGeometryHook(int port)
         {
             lock (_hookSync)
             {
-                _hookGeom = null;
-                _hookPids = null;
+                for (int i = _hookJobs.Count - 1; i >= 0; i--)
+                    if (_hookJobs[i].Port == port) _hookJobs.RemoveAt(i);
             }
         }
 
@@ -340,11 +360,16 @@ namespace DshWebManager
                 if (hook == IntPtr.Zero) return;
                 while (true)
                 {
-                    bool armed;
+                    bool armed = false;
                     lock (_hookSync)
                     {
-                        armed = _hookGeom != null
-                            && DateTime.Now.Subtract(_hookArmedAt) <= HookMaxArmed;
+                        for (int i = _hookJobs.Count - 1; i >= 0; i--)
+                        {
+                            if (DateTime.Now.Subtract(_hookJobs[i].ArmedAt) > HookMaxArmed)
+                                _hookJobs.RemoveAt(i); // give up on this launch
+                            else
+                                armed = true;
+                        }
                     }
                     if (!armed) break;
                     Win32.MsgWaitForMultipleObjects(0, null, false, 1000, Win32.QS_ALLINPUT);
@@ -360,7 +385,7 @@ namespace DshWebManager
             finally
             {
                 if (hook != IntPtr.Zero) Win32.UnhookWinEvent(hook);
-                lock (_hookSync) { _hookGeom = null; _hookPids = null; }
+                lock (_hookSync) { _hookJobs.Clear(); }
             }
         }
 
@@ -370,13 +395,18 @@ namespace DshWebManager
             try
             {
                 if (hwnd == IntPtr.Zero || idObject != Win32.OBJID_WINDOW) return;
-                System.Collections.Generic.HashSet<uint> pids;
-                WindowConfig geom;
-                lock (_hookSync) { pids = _hookPids; geom = _hookGeom; }
-                if (pids == null || geom == null) return;
                 uint pid;
                 Win32.GetWindowThreadProcessId(hwnd, out pid);
-                if (!pids.Contains(pid)) return;
+                GeometryJob job = null;
+                lock (_hookSync)
+                {
+                    if (_hookJobs.Count == 0) return;
+                    foreach (GeometryJob j in _hookJobs)
+                        if (j.Pids.Contains(pid)) { job = j; break; }
+                }
+                if (job == null) return;
+                WindowConfig geom = job.Geom;
+                if (geom == null) return;
                 if (Win32.GetAncestor(hwnd, Win32.GA_ROOT) != hwnd) return;
                 System.Text.StringBuilder cls = new System.Text.StringBuilder(64);
                 Win32.GetClassName(hwnd, cls, 64);
@@ -475,11 +505,11 @@ namespace DshWebManager
                         if (h != IntPtr.Zero)
                         {
                             RestoreGeometry(h, snapshot);
-                            DisarmGeometryHook(); // fallback pass took over / hook succeeded
+                            DisarmGeometryHook(port); // fallback pass took over / hook succeeded
                             return;
                         }
                     }
-                    DisarmGeometryHook(); // gave up: stop the pump thread
+                    DisarmGeometryHook(port); // gave up: stop this port's pump job
                 }
                 catch (Exception ex) { FileLog.Error("RestoreGeometry pass: " + ex.Message); }
             });
@@ -578,13 +608,17 @@ namespace DshWebManager
 
         /// <summary>Applies the DSH icon (32px big / 16px small) + AUMID to the app window.
         /// Done once per window handle: the icon/AUMID persist, so re-sending every
-        /// tick was pure overhead (and the cross-process SendMessage could stall).</summary>
+        /// tick was pure overhead (and the cross-process SendMessage could stall).
+        /// The "already handled" guard is PER PORT: with several instances there are
+        /// several windows, and a single remembered hwnd would ping-pong between
+        /// them and re-apply every tick.</summary>
         public static void ApplyIconToWindow(int port)
         {
             IntPtr h = FindAppWindow(port);
             if (h == IntPtr.Zero) return;
-            if (h == _lastAumidHwnd) return; // already applied to this window
-            _lastAumidHwnd = h;
+            IntPtr last;
+            if (_aumidHwnds.TryGetValue(port, out last) && last == h) return; // already applied
+            _aumidHwnds[port] = h;
             EnsureIcons();
             if (_bigIcon != IntPtr.Zero)
                 Win32.SendMessageW(h, Win32.WM_SETICON, new IntPtr(Win32.ICON_BIG), _bigIcon);
@@ -670,6 +704,9 @@ namespace DshWebManager
                 if (_launchAt.TryGetValue(port, out launched)
                     && now.Subtract(launched) < CaptureHoldoff)
                     return;
+                // Holdoff over: prune the entry so the map does not grow with
+                // every launch over the manager's lifetime.
+                _launchAt.Remove(port);
             }
             IntPtr h = FindAppWindow(port);
             if (h == IntPtr.Zero) return;

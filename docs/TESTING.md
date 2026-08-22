@@ -335,3 +335,14 @@ WinEventHook（CREATE..SHOW，无 DLL 注入）；目标进程集合 = 该端口
 ## 版本号规则（H3 延续）
 
 - 每次发布同步 bump `src/AssemblyInfo.cs`、`src/ManagerConfig.cs`（默认+Load 回退）、`config.example.json`；本次 v3.5.0。
+
+## 低优先级修复轮 — 2026-08-23 (v3.5.1)
+
+| # | 问题 | 修复 |
+|---|------|------|
+| GGGG2 | L1: 显式停止后固定 15s 重附着盲区（期间手动起的服务不显示） | `Stop` 改为有界等待端口释放（≤3s）：释放成功 → 无盲区直接显示"未启动"；仍未释放（慢退出/外部服务）→ 仅 5s 短暂抑制 |
+| HHHH2 | L2: `_launchAt` 字典随启动次数增长不清理 | 保持期过后在 CaptureSize 中移除条目 |
+| IIII2 | L3: 双后端几乎同时开窗时第二个钩子覆盖第一个（首个退化为轮询校正） | 钩子改为多任务列表（每端口一个 GeometryJob，含 pids+几何），全部完成/超时才解除；`DisarmGeometryHook(port)` 按端口移除 |
+| JJJJ2 | L4: RefreshRuntime 10s 节流非原子 | 已被 M1 的 Tick 重入守卫串行化覆盖，无需改码 |
+| KKKK2 | L5: FileLog 每次调用开/关文件 | 常驻 StreamWriter（AutoFlush），滚动时重建；失败自动失效重开 |
+| LLLL2 | L6: IsListening 仅 IPv4 回环 | 增加 `::1` 探测（IPv6/双栈监听不再漏检）；WSL 无转发仍由 WslPortOwnerPid 兜底 |

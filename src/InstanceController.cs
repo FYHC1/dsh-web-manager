@@ -235,12 +235,12 @@ namespace DshWebManager
                 if (State == InstanceState.Attached && _config.StopAttached != true)
                 {
                     // Window-only management mode: the external dsh is the user's
-                    // own; just detach (and suppress the re-attach briefly so the
-                    // status does not bounce right back while the user watches).
+                    // own; just detach. The service keeps serving, so suppress the
+                    // re-attach only briefly to keep the 已解除 status visible.
                     FileLog.Info("Detaching from attached dsh (StopAttached=false), port " + ActivePort);
                     State = InstanceState.Stopped;
                     LastError = null;
-                    _suppressAttachUntil = DateTime.UtcNow.AddSeconds(15);
+                    _suppressAttachUntil = DateTime.UtcNow.AddSeconds(5);
                     FireStatus("已解除对外部服务的附着");
                     _missingCount = 0;
                     return;
@@ -255,14 +255,16 @@ namespace DshWebManager
                         + ", state " + State + ")");
                     try { _backend.Stop(ActivePort); }
                     catch (Exception ex) { FileLog.Error("Stop backend failed: " + ex.Message); }
-                    bool released = false;
-                    try { released = !_backend.IsServiceUp(ActivePort); } catch { }
+                    // Wait (bounded) for the port to actually release so a draining
+                    // service cannot flip the status back to 运行中 and the tray
+                    // shows the truth (未启动) immediately - no 15s blind window
+                    // during which a user-started dsh on the port is ignored.
+                    bool released = WaitForRelease(ActivePort, TimeSpan.FromSeconds(3));
                     State = InstanceState.Stopped;
                     LastError = null;
-                    // An explicit stop must not be instantly undone by the
-                    // stopped-probe re-attach (a slow shutdown would otherwise
-                    // flip the tray back to 运行中 within 5 seconds).
-                    _suppressAttachUntil = DateTime.UtcNow.AddSeconds(15);
+                    _suppressAttachUntil = released
+                        ? DateTime.MinValue
+                        : DateTime.UtcNow.AddSeconds(5); // still draining / external: short guard only
                     FireStatus(released ? "服务已停止" : "已发送停止指令，服务退出中");
                 }
                 else
@@ -271,6 +273,24 @@ namespace DshWebManager
                 }
                 _missingCount = 0;
             }
+        }
+
+        /// <summary>Polls IsServiceUp until the port is released or the deadline
+        /// passes. The stopped-probe re-attach suppression is only needed while
+        /// the port still answers, so waiting here keeps the blind window ~0.</summary>
+        private bool WaitForRelease(int port, TimeSpan maxWait)
+        {
+            DateTime deadline = DateTime.UtcNow.Add(maxWait);
+            while (DateTime.UtcNow < deadline)
+            {
+                bool up = true;
+                try { up = _backend.IsServiceUp(port); } catch { }
+                if (!up) return true;
+                System.Threading.Thread.Sleep(250);
+            }
+            bool finalUp = true;
+            try { finalUp = _backend.IsServiceUp(port); } catch { }
+            return !finalUp;
         }
 
         /// <summary>Restarts: stop (if owned) then start again.</summary>
