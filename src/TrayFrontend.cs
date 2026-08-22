@@ -94,6 +94,12 @@ namespace DshWebManager
             switcher.Controls.Add(_btnWindows);
             switcher.Controls.Add(_btnWsl);
             ToolStripControlHost switcherHost = new ToolStripControlHost(switcher);
+            // Pin the host size: a self-sizing host nested in an auto-sized menu causes
+            // repeated measure/layout churn (the tray felt janky). A fixed host breaks the
+            // cascading AutoSize loop.
+            switcherHost.AutoSize = false;
+            Size swPref = switcher.GetPreferredSize(Size.Empty);
+            switcherHost.Size = new Size(swPref.Width + 8, swPref.Height + 6);
 
             _modeWrapperItem = new ToolStripMenuItem(MenuWslModeWrapper);
             _modeSystemdItem = new ToolStripMenuItem(MenuWslModeSystemd);
@@ -300,15 +306,16 @@ namespace DshWebManager
                 if (!_menu.Visible) return;
                 Screen screen = Screen.FromPoint(Cursor.Position);
                 _menuFixedBottom = screen.WorkingArea.Bottom - 4;
+                // Use the menu's already-laid-out Width/Height instead of
+                // GetPreferredSize (which forces a full re-measure of every item + the
+                // hosted FlowLayoutPanel — the main source of tray jank on switching).
                 if (_menuFixedLeft < 0)
                 {
-                    Size sz = _menu.GetPreferredSize(Size.Empty);
-                    int x = Cursor.Position.X - sz.Width; // right-align to the cursor
+                    int x = Cursor.Position.X - _menu.Width;
                     if (x < screen.WorkingArea.Left) x = screen.WorkingArea.Left;
                     _menuFixedLeft = x;
                 }
-                Size sz2 = _menu.GetPreferredSize(Size.Empty);
-                _menu.Location = new Point(_menuFixedLeft, _menuFixedBottom - sz2.Height);
+                _menu.Location = new Point(_menuFixedLeft, _menuFixedBottom - _menu.Height);
             }
             catch { }
         }
