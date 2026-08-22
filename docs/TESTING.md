@@ -190,3 +190,12 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | JJJ | `updateplugin` 控制动作 | `dsh-web-manager.exe updateplugin` | ✅ 自动探测 spec `file:/home/hgl/projects/dsh/dsh-web-manager` → `dsh plugin remove/add` → profile package.json 的 dependencies 与 bundles 完整保留，node_modules 刷新为新内容（含新增 scripts/dsh-webui） |
 | KKK | `dsh-webui` 打开独立窗口 | WSL 内 `bash scripts/dsh-webui` | ✅ 转发 `open wsl` → 管理器 Launch Edge --app :3080 + AUMID 应用；未装管理器时给出安装提示 |
 | LLL | 插件自动注册 dsh-webui | 运行插件 ensure-shortcut.sh | ✅ 幂等：复用共享管理器、快捷方式已正确则跳过、`install -m 755` 注册 `~/.local/bin/dsh-webui` |
+
+## v3.1 修复矩阵 — 2026-08-22 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| MMM | 窗口尺寸记忆（根因） | 多实例下调整 WSL 窗口大小后重开 | ❌ 旧版：`Launch` 读管理器级 `config.Window`（945x1020），`CaptureSize` 写实例级 `Window`（1665x1020）→ 尺寸永不生效 → 修复：`Launch/EnsureVisible` 改用实例级 WindowConfig；实测重开 `--window-size=1665x1020` ✅ |
+| NNN | 退出托盘图标残留 | 菜单「退出」 | ✅ 根因：`Environment.Exit` 跳过 Dispose，图标不删 → `Exiting` 事件先 `NotifyIcon.Visible=false`（NIM_DELETE）再退出；覆盖菜单/控制管道/自更新三条退出路径 |
+| OOO | 状态跟随顶部切换 | 点 Windows/WSL 按钮 | ✅ 切换即 `RefreshActiveStatus` 刷新状态项（旧版等下一次 StatusChanged 才更新）；状态只取 ActiveController，无匹配显示「未选择后端」 |
+| PPP | 插件包更新明细 | `updateplugin` | ✅ 气泡/日志含具体包名@版本与来源：`updated dsh-web-manager@1.0.0 in web from file:/home/hgl/projects/dsh/dsh-web-manager` |

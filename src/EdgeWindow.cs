@@ -35,8 +35,10 @@ namespace DshWebManager
             return null;
         }
 
-        /// <summary>Launches the Edge app window for the given URL with remembered size/position.</summary>
-        public static void Launch(ManagerConfig config, string url, int port)
+        /// <summary>Launches the Edge app window for the given URL with the
+        /// instance's remembered size/position (the per-instance WindowConfig,
+        /// not the manager-level one: multi-instance windows each keep their own).</summary>
+        public static void Launch(string url, int port, string dataDir, WindowConfig window)
         {
             string edge = FindEdgeExe();
             if (edge == null) throw new InvalidOperationException("Microsoft Edge was not found.");
@@ -47,15 +49,17 @@ namespace DshWebManager
             // window, and the manager can neither find it nor set its taskbar icon.
             // Each instance gets its own profile dir (suffixed by port) so multiple
             // app windows never merge into one Edge/browser window.
-            string dataDir = config.DataDir;
             if (String.IsNullOrEmpty(dataDir))
                 dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-web-manager-browser");
             dataDir = dataDir + "-" + port;
             string args = "--app=" + url + " --user-data-dir=\"" + dataDir + "\"";
-            if (!String.IsNullOrEmpty(config.Window.Size))
-                args += " --window-size=" + config.Window.Size;
-            if (!String.IsNullOrEmpty(config.Window.Position))
-                args += " --window-position=" + config.Window.Position;
+            if (window != null)
+            {
+                if (!String.IsNullOrEmpty(window.Size))
+                    args += " --window-size=" + window.Size;
+                if (!String.IsNullOrEmpty(window.Position))
+                    args += " --window-position=" + window.Position;
+            }
 
             FileLog.Info("Launching Edge app window: " + args);
             ProcessStartInfo psi = new ProcessStartInfo(edge, args);
@@ -159,7 +163,7 @@ namespace DshWebManager
         }
 
         /// <summary>Brings the app window to front, or launches a new one when absent.</summary>
-        public static void EnsureVisible(ManagerConfig config, string url, int port)
+        public static void EnsureVisible(WindowConfig window, string dataDir, string url, int port)
         {
             IntPtr h = FindAppWindow(port);
             if (h != IntPtr.Zero)
@@ -168,7 +172,7 @@ namespace DshWebManager
                 Win32.SetForegroundWindow(h);
                 return;
             }
-            Launch(config, url, port);
+            Launch(url, port, dataDir, window);
         }
 
         /// <summary>Closes the app window for the port (WM_CLOSE), if present.</summary>

@@ -80,7 +80,7 @@ namespace DshWebManager
             _btnWindows.Height = 30;
             _btnWindows.Cursor = Cursors.Hand;
             _btnWindows.TabStop = false;
-            _btnWindows.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); RefocusMenu(); };
+            _btnWindows.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); RefreshActiveStatus(); RefocusMenu(); };
 
             _btnWsl = new Button();
             _btnWsl.Text = MenuBackendWsl;
@@ -90,7 +90,7 @@ namespace DshWebManager
             _btnWsl.Height = 30;
             _btnWsl.Cursor = Cursors.Hand;
             _btnWsl.TabStop = false;
-            _btnWsl.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); RefocusMenu(); };
+            _btnWsl.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); RefreshActiveStatus(); RefocusMenu(); };
 
             FlowLayoutPanel switcher = new FlowLayoutPanel();
             switcher.FlowDirection = FlowDirection.LeftToRight;
@@ -168,6 +168,13 @@ namespace DshWebManager
             _service.StatusChanged += s => UpdateStatus(s);
             _service.Balloon += (t, b) => ShowBalloon(t, b);
             _service.InstancesChanged += RebuildInstanceMenu;
+            // Environment.Exit skips Dispose, so the tray icon must be removed
+            // explicitly or it lingers as a ghost after 退出 (and a second click
+            // seemed needed to make it vanish).
+            _service.Exiting += delegate
+            {
+                try { _notify.Visible = false; } catch { }
+            };
 
             ApplyThemeToSubmenus();
             _statusItem.AutoSize = false;
@@ -252,7 +259,7 @@ namespace DshWebManager
                 try
                 {
                     c.Restart();
-                    EdgeWindow.EnsureVisible(_service.Config, c.Backend.GetWindowUrl(c.ActivePort), c.ActivePort);
+                    EdgeWindow.EnsureVisible(c.Instance.Window, _service.Config.DataDir, c.Backend.GetWindowUrl(c.ActivePort), c.ActivePort);
                 }
                 catch (Exception ex) { FileLog.Error("RestartInstance: " + ex.Message); }
             });
@@ -420,10 +427,11 @@ namespace DshWebManager
         {
             try
             {
-                // Show the active instance's compact StatusText (with runtime summary)
-                // instead of the raw event message, so the tray stays short/consistent.
+                // Show ONLY the active instance's compact StatusText (the backend
+                // selected by the top Windows/WSL toggle). Never fall back to an
+                // event message from the other side.
                 InstanceController active = _service.Controller;
-                string status = active == null ? text : active.StatusText;
+                string status = active == null ? "\u672a\u9009\u62e9\u540e\u7aef" : active.StatusText; // 未选择后端
                 string display = status;
                 int sep = display.IndexOf(" · ");
                 if (sep >= 0)
@@ -471,6 +479,19 @@ namespace DshWebManager
             try
             {
                 if (_menu != null && _menu.Visible) _menu.Focus();
+            }
+            catch { }
+        }
+
+        /// <summary>Re-renders the status item from the ACTIVE backend right away,
+        /// so switching the top Windows/WSL toggle never leaves a stale status
+        /// (previously the text only refreshed on the next StatusChanged event).</summary>
+        private void RefreshActiveStatus()
+        {
+            try
+            {
+                InstanceController active = _service.Controller;
+                UpdateStatusCore(active == null ? String.Empty : active.StatusText);
             }
             catch { }
         }

@@ -25,6 +25,7 @@ namespace DshWebManager
         public event Action<string> StatusChanged;   // UI thread marshaling is done by the frontend
         public event Action<string, string> Balloon; // title, text
         public event Action InstancesChanged;        // raised after add/remove instance (v3.0 P2-2)
+        public event Action Exiting;                 // raised right before process exit (hide the tray icon)
 
         public IList<InstanceController> Controllers { get { return _controllers; } }
 
@@ -281,7 +282,7 @@ namespace DshWebManager
             }
             try
             {
-                EdgeWindow.EnsureVisible(_config, url, c.ActivePort);
+                EdgeWindow.EnsureVisible(c.Instance.Window, _config.DataDir, url, c.ActivePort);
                 _hadWindows[c] = true;
             }
             catch (Exception ex)
@@ -315,7 +316,7 @@ namespace DshWebManager
                     string url = WindowUrl(c);
                     if (!String.IsNullOrEmpty(url))
                     {
-                        EdgeWindow.EnsureVisible(_config, url, c.ActivePort);
+                        EdgeWindow.EnsureVisible(c.Instance.Window, _config.DataDir, url, c.ActivePort);
                         _hadWindows[c] = true;
                         FileLog.Info("OpenWindow: retry succeeded after ~" + ((attempt + 1) * 5) + "s");
                         return;
@@ -573,7 +574,14 @@ namespace DshWebManager
                     CommandResult add = WslTools.RunCapture(distro, "bash", new string[] { "-lc",
                         "dsh plugin --profile " + WslTools.BashQuote(profile) + " add " + WslTools.BashQuote(spec) }, 180000);
                     if (add.ExitCode == 0)
-                        Balloon("dsh web manager", "dsh 插件包已更新（" + profile + "），重启 dsh 后生效");
+                    {
+                        // Report exactly which package version was installed and from where.
+                        string ver = ReadPluginVersion(distro, profile);
+                        string detail = String.IsNullOrEmpty(ver) ? "dsh-web-manager" : "dsh-web-manager@" + ver;
+                        FileLog.Info("UpdatePluginBundle: updated " + detail + " in " + profile + " from " + spec);
+                        Balloon("dsh web manager", "dsh 插件包已更新（" + profile + "）：" + detail
+                            + "（来源 " + spec + "），重启 dsh 后生效");
+                    }
                     else
                     {
                         FileLog.Error("UpdatePluginBundle add failed: "
@@ -605,12 +613,25 @@ namespace DshWebManager
             return (r.StandardOutput ?? String.Empty).Trim();
         }
 
+        /// <summary>Installed dsh-web-manager version inside the profile ("" if unreadable).</summary>
+        private static string ReadPluginVersion(string distro, string profile)
+        {
+            string script = "node -e 'const base=process.env.DSH_HOME||(process.env.HOME+\"/.dsh\");"
+                + "const p=base+\"/profiles/" + profile + "/node_modules/dsh-web-manager/package.json\";"
+                + "try{console.log(require(p).version)}catch(e){process.exit(1)}'";
+            CommandResult r = WslTools.RunCapture(distro, "bash", new string[] { "-lc", script }, 30000);
+            if (r.ExitCode != 0) return String.Empty;
+            return (r.StandardOutput ?? String.Empty).Trim();
+        }
+
         /// <summary>Exits the tray without stopping dsh services so the detached
         /// updater can replace this EXE; on restart the manager re-attaches to the
         /// still-running dsh instances.</summary>
         public void ExitForUpdate()
         {
             _disposed = true;
+            var h = Exiting;
+            if (h != null) h();
             Environment.Exit(0);
         }
 
@@ -765,6 +786,12 @@ namespace DshWebManager
 
         public void Exit(bool stopService)
         {
+            // Hide the tray icon FIRST: Environment.Exit below never runs the
+            // Form's Dispose, so without an explicit NIM_DELETE the icon lingers
+            // as a ghost until hover/Explorer refresh (and a second click seemed
+            // to be required to make it vanish).
+            var h = Exiting;
+            if (h != null) h();
             if (stopService || !_config.ExitKeepService)
             {
                 foreach (InstanceController c in _controllers)

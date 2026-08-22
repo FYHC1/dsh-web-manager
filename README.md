@@ -250,8 +250,13 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
   脱离式更新脚本（等 exe 解锁 → 替换 → 托盘重启，不停止 dsh）+ 托盘「检查管理器更新 /
   更新 dsh web manager」+ 启动时 24h 节流检查 + `updatemanager` 控制动作 ✅ 已交付
 - **v3.1 插件包更新 + dsh-webui**：托盘「更新 dsh 插件包」（自动探测 profile 安装来源，
-  `dsh plugin remove/add` 一键刷新）+ Linux 端 `dsh-webui` 命令（转发给共享管理器打开
-  独立窗口，插件自动注册到 `~/.local/bin`）✅ 已交付
+  `dsh plugin remove/add` 一键刷新，提示具体包名@版本与来源）+ Linux 端 `dsh-webui`
+  命令（转发给共享管理器打开独立窗口，插件自动注册到 `~/.local/bin`）✅ 已交付
+- **v3.1 修复四连**：①退出时立即隐藏托盘图标（`Exiting` 事件 → `NIM_DELETE`，不再出现
+  幽灵图标/需点两次退出）；②独立窗口尺寸记忆修复（根因：`Launch` 读管理器级 `Window`，
+  而 `CaptureSize` 写入实例级 `Window`，多实例下尺寸永不生效 → 改用实例级窗口配置）；
+  ③状态栏严格跟随顶部 Windows/WSL 切换按钮（切换即刷新，只显示所选端，无匹配显示
+  「未选择后端」）；④插件包更新提示具体更新的包与来源 ✅ 已交付
 
 ## 许可
 
