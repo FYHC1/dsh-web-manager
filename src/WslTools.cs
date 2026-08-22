@@ -706,7 +706,7 @@ BRIDGE_PORT=""${3:-0}""
 BRIDGE_TOKEN=""${4:-}""
 HOST=""127.0.0.1""
 DWM_DIR=""$HOME/.dsh-webui""
-PIDFILE=""$DWM_DIR/wsl-dsh.pid""
+PIDFILE=""$DWM_DIR/wsl-dsh-$PORT.pid""
 LOG=""$DWM_DIR/wsl-dsh.log""
 mkdir -p ""$DWM_DIR"" || exit 1
 

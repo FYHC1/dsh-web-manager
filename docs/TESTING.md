@@ -312,3 +312,13 @@ WinEventHook（CREATE..SHOW，无 DLL 注入）；目标进程集合 = 该端口
 | UUUU | `closeinstance windows`（3081 为 Attached） | ✅ 桥接优雅关闭 `{"ok":true,"shuttingDown":true}`；12s/24s 后端口仍空闲（无重附着）；日志 `Stopping dsh (Windows 本机, port 3081, state Attached)` → `服务已停止` |
 | VVVV | 停止后 `open windows` 恢复 | ✅ 服务以 Managed 重启（wrapper pid 可见），窗口经几何钩子以记忆尺寸 1611×1020@122,28 一次弹出 |
 | WWWW | 语义说明 | 关闭**窗口**（X 按钮）默认不停服务（CloseStopsService=false，快速重开设计）；「关闭实例」停服务+关窗；退出管理器在 ExitKeepService=false 时停止全部实例（含 systemd 单元，会断开其上的活动会话） |
+
+## 代码审查修复轮 — 2026-08-23 (v3.4)
+
+| # | 问题 | 修复 |
+|---|------|------|
+| XXXX | H1: wrapper 模式多实例互相误杀（`pkill wsl-start[.]sh` + 共享 `wsl-dsh.pid`） | pidfile 按端口（`wsl-dsh-<port>.pid`，C# 常量与 scripts/wsl/wsl-start.sh 同步）；pkill 锚定脚本名+端口 token |
+| YYYY | H2: `ManagerConfig.Save` 无并发保护且非原子（并发写可能损坏 config.json） | `SaveSync` 锁 + 临时文件 + `File.Replace` 原子替换（NTFS） |
+| ZZZZ | H3: 程序集版本恒定 3.0.0.0 | AssemblyInfo/ManagerConfig/config.example 统一 3.4.0；自更新显示与实际版本一致 |
+| AAAA2 | M4: 更新检查失败仍推进 24h 节流并清空 LastKnownLatest | 仅 registry 查询成功才推进节流/持久化 |
+| BBBB2 | M6: `UpdatePluginBundle` 的 profile 缺空格/注入校验 | 与 `WslBackend.Start` 一致拒绝空格/制表符 |

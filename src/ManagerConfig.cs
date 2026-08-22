@@ -32,6 +32,11 @@ namespace DshWebManager
 
     public sealed class ManagerConfig
     {
+        // Serializes ALL writes (timer-thread CaptureSize saves, UI-thread backend
+        // switches, control-pipe actions): File.WriteAllText from two threads can
+        // interleave and corrupt config.json, after which Load silently falls back
+        // to defaults (settings lost). The write is atomic via temp file + replace.
+        private static readonly object SaveSync = new object();
         public int Port { get; set; }             // windows backend port
         public bool AutoFallback { get; set; }
         public string DataDir { get; set; }
@@ -128,7 +133,7 @@ namespace DshWebManager
             ManagerUpdateApi = String.Empty;
             PluginUpdateSpec = String.Empty;
             Profile = "web";
-            Version = "3.0.0";
+            Version = "3.4.0";
             Instances = null; // null = legacy single-instance mode
         }
 
@@ -160,7 +165,7 @@ namespace DshWebManager
                         if (loaded.ManagerUpdateApi == null) loaded.ManagerUpdateApi = String.Empty;
                         if (loaded.PluginUpdateSpec == null) loaded.PluginUpdateSpec = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
-                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.0.0";
+                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.4.0";
                         return loaded;
                     }
                 }
@@ -174,16 +179,25 @@ namespace DshWebManager
 
         public void Save()
         {
-            try
+            lock (SaveSync)
             {
-                AppPaths.EnsureDirectories();
-                JavaScriptSerializer ser = new JavaScriptSerializer();
-                string json = ser.Serialize(this);
-                File.WriteAllText(AppPaths.ConfigFile, json);
-            }
-            catch (Exception ex)
-            {
-                FileLog.Error("Failed to write config: " + ex.Message);
+                string tmp = AppPaths.ConfigFile + ".tmp";
+                try
+                {
+                    AppPaths.EnsureDirectories();
+                    JavaScriptSerializer ser = new JavaScriptSerializer();
+                    string json = ser.Serialize(this);
+                    File.WriteAllText(tmp, json);
+                    if (File.Exists(AppPaths.ConfigFile))
+                        File.Replace(tmp, AppPaths.ConfigFile, null); // atomic on NTFS
+                    else
+                        File.Move(tmp, AppPaths.ConfigFile);
+                }
+                catch (Exception ex)
+                {
+                    FileLog.Error("Failed to write config: " + ex.Message);
+                    try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                }
             }
         }
 

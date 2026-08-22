@@ -306,10 +306,14 @@ namespace DshWebManager
             }
             if (!String.IsNullOrEmpty(_distro))
             {
-                // Ask the distro to stop the launcher script (TERM -> cleanup -> exit).
-                // The [.] bracket trick prevents pkill from matching this very command.
-                string script = "pkill -TERM -f 'wsl-start[.]sh' 2>/dev/null; "
-                    + "kill -TERM $(cat ~/.dsh-webui/wsl-dsh.pid 2>/dev/null) 2>/dev/null; true";
+                // Ask the distro to stop ONLY this instance's launcher script
+                // (TERM -> cleanup -> exit). Multi-instance safe: the pattern
+                // anchors on the script name AND the per-instance port token, so
+                // another instance's wrapper on a different port is never hit.
+                // The [.] bracket trick prevents pkill from matching this very
+                // command; the pidfile is per-port too (wsl-dsh-<port>.pid).
+                string script = "pkill -TERM -f 'wsl-start[.]sh.* " + port + " ' 2>/dev/null; "
+                    + "kill -TERM $(cat ~/.dsh-webui/wsl-dsh-" + port + ".pid 2>/dev/null) 2>/dev/null; true";
                 CommandResult r = WslTools.RunCapture(_distro, "bash", new string[] { "-lc", script }, 8000);
                 if (r.ExitCode != 0)
                     FileLog.Error("WslBackend.Stop: distro-side kill returned " + r.ExitCode);

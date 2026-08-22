@@ -146,7 +146,7 @@
 - 共享配置 `C:\Users\hgl\.dsh-webui\config.json`
 - 日志（真实）`C:\Users\hgl\AppData\Local\dsh-web-manager\logs\manager.log`
 - 官方图标 `C:\Users\hgl\.dsh-webui\dsh-webui.ico`（sha a821…）
-- WSL 侧状态 `~/.dsh-webui/`（wsl-start.sh / wsl-dsh.log / wsl-dsh.pid / wsl-bootstrap.sh）
+- WSL 侧状态 `~/.dsh-webui/`（wsl-start.sh / wsl-dsh.log / wsl-dsh-<port>.pid / wsl-bootstrap.sh）
 
 ## 开发环境速查
 

@@ -537,6 +537,15 @@ namespace DshWebManager
                         return;
                     }
                     string profile = String.IsNullOrWhiteSpace(_config.Profile) ? "web" : _config.Profile;
+                    // Same guard as WslBackend.Start: the profile is interpolated
+                    // into node -e / bash command strings, so spaces/tabs (which
+                    // would break quoting) must be rejected up front.
+                    if (profile.IndexOfAny(new char[] { ' ', '\t' }) >= 0)
+                    {
+                        FileLog.Error("UpdatePluginBundle: profile with spaces is not supported: " + profile);
+                        Balloon("dsh web manager", "Profile 不能包含空格，插件包更新已取消");
+                        return;
+                    }
                     string spec = String.IsNullOrWhiteSpace(_config.PluginUpdateSpec)
                         ? ReadPluginSpec(distro, profile)
                         : _config.PluginUpdateSpec;

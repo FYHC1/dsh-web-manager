@@ -84,12 +84,16 @@ namespace DshWebManager
             if (DateTime.UtcNow.Subtract(last) < Throttle)
                 return String.Empty; // still throttled; keep the last known answer
 
-            config.LastVersionCheckUtc = DateTime.UtcNow.ToString("o");
             string current = String.IsNullOrEmpty(currentOverride) ? GetCurrentWslDshVersion(distro) : currentOverride;
             string latest = GetLatestDshVersion();
+            // Only advance the throttle / persist state when the registry query
+            // actually succeeded: a network failure must not push the next real
+            // check out by 24 h or wipe the previously known latest version.
+            if (String.IsNullOrEmpty(latest)) return String.Empty;
+            config.LastVersionCheckUtc = DateTime.UtcNow.ToString("o");
             config.LastKnownLatest = latest;
             config.Save();
-            if (String.IsNullOrEmpty(current) || String.IsNullOrEmpty(latest)) return String.Empty;
+            if (String.IsNullOrEmpty(current)) return String.Empty;
             if (String.Equals(current.Trim(), latest.Trim(), StringComparison.OrdinalIgnoreCase))
                 return String.Empty;
             FileLog.Info("UpdateChecker: dsh " + current + " -> " + latest);
