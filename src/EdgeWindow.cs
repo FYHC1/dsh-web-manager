@@ -74,9 +74,10 @@ namespace DshWebManager
             // close, Edge startup boost keeps a warm process for the profile.
             // Forwarding to it makes the next open nearly instant (a cold start
             // with this profile's extensions takes ~1s+). The size no longer
-            // depends on the command line (RestoreGeometry enforces it), so a
-            // forwarded launch is fine - the WMI fallback in the enforcement
-            // poll finds the window created by the existing process.
+            // depends on the command line (the geometry hook sizes the hidden
+            // window before it is shown), so a forwarded launch is fine - the
+            // WMI fallback in the enforcement poll finds the window created by
+            // the existing process.
             lock (_launchAt) { _launchAt[port] = DateTime.Now; } // hold CaptureSize off for a while
             ProcessStartInfo psi = new ProcessStartInfo(edge, args);
             psi.UseShellExecute = false;
@@ -219,9 +220,13 @@ namespace DshWebManager
         }
 
         /// <summary>Brings the app window to front, or launches a new one when absent.
-        /// Returns true when a new window was launched. After a launch, a one-shot
-        /// pass enforces the remembered geometry: Edge may ignore the size/position
-        /// flags (startup-boost forwarding or its own saved placement wins).</summary>
+        /// Returns true when a new window was launched. Edge 150 IGNORES every size
+        /// channel for --app windows (--window-size, --start-minimized, the
+        /// Preferences window_placement/app_window_placement keys - all verified
+        /// empirically) and always shows the window at its own 945x1020 default
+        /// first, so the remembered geometry is applied by a WinEvent hook that
+        /// sizes the window WHILE STILL HIDDEN (EVENT_OBJECT_CREATE fires ~80ms
+        /// before the SHOW), with a polling enforcement pass as fallback.</summary>
         public static bool EnsureVisible(WindowConfig window, string dataDir, string url, int port)
         {
             IntPtr h = FindAppWindow(port);
@@ -242,9 +247,193 @@ namespace DshWebManager
                 snap.Size = window.Size;
                 snap.Position = window.Position;
             }
+            // Arm the geometry hook BEFORE the launch so the very first window
+            // creation event is caught (the window is created hidden and shown
+            // ~80ms later; sizing it at creation means it is never visible at
+            // the wrong size). The launched pid is added right after start.
+            if (snap != null) ArmGeometryHook(port, snap);
             Process launched = Launch(url, port, dataDir, window);
+            NoteLaunchedPid(launched == null ? 0 : launched.Id);
             ScheduleGeometryEnforce(port, snap, launched);
             return true;
+        }
+
+        // ------------------------------------------------------------------
+        // Geometry hook: sizes the app window while it is still hidden.
+        // An out-of-process WinEvent hook (no DLL injection) watches
+        // EVENT_OBJECT_CREATE..EVENT_OBJECT_SHOW on its own message-pump
+        // thread; when a target Edge process creates the real browser frame
+        // (Chrome_WidgetWin_1, unowned, captioned, resizable - Edge's little
+        // popup bubbles are owned WS_POPUP windows and are skipped), the
+        // remembered geometry is applied via SetWindowPos before Chromium
+        // shows the window, so the user never sees the default 945x1020.
+        // ------------------------------------------------------------------
+        private static readonly object _hookSync = new object();
+        private static Win32.WinEventDelegate _hookDelegate;   // strong ref: a collected delegate kills the hook
+        private static System.Collections.Generic.HashSet<uint> _hookPids;
+        private static WindowConfig _hookGeom;
+        private static DateTime _hookArmedAt = DateTime.MinValue;
+        private static readonly TimeSpan HookMaxArmed = TimeSpan.FromSeconds(20);
+
+        /// <summary>Starts the hook for one launch. Pid set = every CURRENT
+        /// browser process of the per-port profile (covers the preheated warm
+        /// process that receives a forwarded launch); the freshly launched
+        /// forwarder pid is added via NoteLaunchedPid right after start.</summary>
+        private static void ArmGeometryHook(int port, WindowConfig geom)
+        {
+            try
+            {
+                lock (_hookSync)
+                {
+                    _hookGeom = geom;
+                    _hookPids = new System.Collections.Generic.HashSet<uint>();
+                    string needle = "-" + port + "\"";
+                    foreach (EdgeProcInfo info in GetEdgeProcesses())
+                    {
+                        if (info.CommandLine.IndexOf("--type=", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                        if (info.CommandLine.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        _hookPids.Add(info.Pid);
+                    }
+                    if (_hookDelegate == null) _hookDelegate = OnGeometryWinEvent;
+                    _hookArmedAt = DateTime.Now;
+                }
+                System.Threading.Thread t = new System.Threading.Thread(HookMessageLoop);
+                t.IsBackground = true;
+                t.Name = "EdgeGeometryHook";
+                t.Start();
+                FileLog.Info("GeometryHook: armed for port " + port);
+            }
+            catch (Exception ex) { FileLog.Error("GeometryHook arm: " + ex.Message); }
+        }
+
+        /// <summary>Adds the just-launched forwarder process to the watched set.</summary>
+        public static void NoteLaunchedPid(int pid)
+        {
+            if (pid <= 0) return;
+            lock (_hookSync)
+            {
+                if (_hookPids != null) _hookPids.Add((uint)pid);
+            }
+        }
+
+        /// <summary>Clears the armed state; the pump thread notices within a
+        /// second and unhooks. Idempotent and thread-safe.</summary>
+        public static void DisarmGeometryHook()
+        {
+            lock (_hookSync)
+            {
+                _hookGeom = null;
+                _hookPids = null;
+            }
+        }
+
+        private static void HookMessageLoop()
+        {
+            IntPtr hook = IntPtr.Zero;
+            try
+            {
+                Win32.WinEventDelegate cb;
+                lock (_hookSync) { cb = _hookDelegate; }
+                if (cb == null) return;
+                hook = Win32.SetWinEventHook(Win32.EVENT_OBJECT_CREATE, Win32.EVENT_OBJECT_SHOW,
+                    IntPtr.Zero, cb, 0, 0, Win32.WINEVENT_OUTOFCONTEXT | Win32.WINEVENT_SKIPOWNPROCESS);
+                if (hook == IntPtr.Zero) return;
+                while (true)
+                {
+                    bool armed;
+                    lock (_hookSync)
+                    {
+                        armed = _hookGeom != null
+                            && DateTime.Now.Subtract(_hookArmedAt) <= HookMaxArmed;
+                    }
+                    if (!armed) break;
+                    Win32.MsgWaitForMultipleObjects(0, null, false, 1000, Win32.QS_ALLINPUT);
+                    Win32.MSG msg;
+                    while (Win32.PeekMessage(out msg, IntPtr.Zero, 0, 0, Win32.PM_REMOVE))
+                    {
+                        Win32.TranslateMessage(ref msg);
+                        Win32.DispatchMessage(ref msg);
+                    }
+                }
+            }
+            catch (Exception ex) { FileLog.Error("GeometryHook loop: " + ex.Message); }
+            finally
+            {
+                if (hook != IntPtr.Zero) Win32.UnhookWinEvent(hook);
+                lock (_hookSync) { _hookGeom = null; _hookPids = null; }
+            }
+        }
+
+        private static void OnGeometryWinEvent(IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
+            int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+        {
+            try
+            {
+                if (hwnd == IntPtr.Zero || idObject != Win32.OBJID_WINDOW) return;
+                System.Collections.Generic.HashSet<uint> pids;
+                WindowConfig geom;
+                lock (_hookSync) { pids = _hookPids; geom = _hookGeom; }
+                if (pids == null || geom == null) return;
+                uint pid;
+                Win32.GetWindowThreadProcessId(hwnd, out pid);
+                if (!pids.Contains(pid)) return;
+                if (Win32.GetAncestor(hwnd, Win32.GA_ROOT) != hwnd) return;
+                System.Text.StringBuilder cls = new System.Text.StringBuilder(64);
+                Win32.GetClassName(hwnd, cls, 64);
+                if (!cls.ToString().StartsWith("Chrome_WidgetWin_1", StringComparison.Ordinal)) return;
+                // The real app frame is an unowned captioned resizable window; Edge's
+                // companion bubbles are owned WS_POPUP windows - never touch those.
+                if (Win32.GetWindow(hwnd, Win32.GW_OWNER) != IntPtr.Zero) return;
+                int style = Win32.GetWindowLong(hwnd, Win32.GWL_STYLE);
+                if ((style & Win32.WS_POPUP) != 0) return;
+                if ((style & Win32.WS_CAPTION) != Win32.WS_CAPTION) return;
+                if ((style & Win32.WS_THICKFRAME) == 0) return;
+
+                if (eventType == Win32.EVENT_OBJECT_CREATE)
+                {
+                    // Chromium creates the frame hidden and shows it ~80ms later:
+                    // apply the geometry now and the SHOW reveals the right size.
+                    SizeHiddenWindow(hwnd, geom);
+                    FileLog.Info("GeometryHook: sized window at CREATE (hidden)");
+                }
+                else // EVENT_OBJECT_SHOW: verify, correct if the size was missed
+                {
+                    Win32.RECT r;
+                    if (!Win32.GetWindowRect(hwnd, out r)) return;
+                    int mw, mh, mx, my;
+                    bool hasSize = TryParseSize(geom.Size, out mw, out mh);
+                    bool hasPos = TryParsePosition(geom.Position, out mx, out my);
+                    bool sizeOk = !hasSize || (r.Width == mw && r.Height == mh);
+                    bool posOk = !hasPos || (r.Left == mx && r.Top == my);
+                    if (sizeOk && posOk)
+                    {
+                        FileLog.Info("GeometryHook: window shown at remembered size " + r.Width + "x" + r.Height);
+                        return;
+                    }
+                    Win32.ShowWindow(hwnd, Win32.SW_HIDE);
+                    SizeHiddenWindow(hwnd, geom);
+                    Win32.ShowWindow(hwnd, Win32.SW_SHOW);
+                    FileLog.Info("GeometryHook: corrected size at SHOW");
+                }
+            }
+            catch (Exception ex) { FileLog.Error("GeometryHook event: " + ex.Message); }
+        }
+
+        /// <summary>SetWindowPos with the remembered geometry (visibility untouched).</summary>
+        private static void SizeHiddenWindow(IntPtr h, WindowConfig window)
+        {
+            int mw, mh, mx, my;
+            bool hasSize = TryParseSize(window.Size, out mw, out mh);
+            bool hasPos = TryParsePosition(window.Position, out mx, out my);
+            if (!hasSize && !hasPos) return;
+            Win32.RECT r;
+            if (!Win32.GetWindowRect(h, out r)) return;
+            int px = hasPos ? mx : r.Left;
+            int py = hasPos ? my : r.Top;
+            int pw = hasSize ? mw : r.Width;
+            int ph = hasSize ? mh : r.Height;
+            if (pw < 100 || ph < 100) return;
+            Win32.SetWindowPos(h, IntPtr.Zero, px, py, pw, ph, Win32.SWP_NOACTIVATE | Win32.SWP_NOZORDER);
         }
 
         /// <summary>Background pass right after a launch: poll for the window to
@@ -286,9 +475,11 @@ namespace DshWebManager
                         if (h != IntPtr.Zero)
                         {
                             RestoreGeometry(h, snapshot);
+                            DisarmGeometryHook(); // fallback pass took over / hook succeeded
                             return;
                         }
                     }
+                    DisarmGeometryHook(); // gave up: stop the pump thread
                 }
                 catch (Exception ex) { FileLog.Error("RestoreGeometry pass: " + ex.Message); }
             });
@@ -344,6 +535,9 @@ namespace DshWebManager
             int pw = hasSize ? memW : r.Width;
             int ph = hasSize ? memH : r.Height;
             if (pw < 100 || ph < 100) return;
+            // The geometry hook usually already sized the hidden window before the
+            // SHOW; skip the redundant SetWindowPos when nothing changed.
+            if (pw == r.Width && ph == r.Height && px == r.Left && py == r.Top) return;
             Win32.SetWindowPos(h, IntPtr.Zero, px, py, pw, ph, Win32.SWP_NOACTIVATE | Win32.SWP_NOZORDER);
             FileLog.Info("RestoreGeometry: applied " + pw + "x" + ph + " @" + px + "," + py);
         }

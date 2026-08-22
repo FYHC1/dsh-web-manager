@@ -64,7 +64,12 @@ namespace DshWebManager
                 switch (State)
                 {
                     case InstanceState.Managed: return "运行中 (" + where + ", " + ActivePort + ")" + RuntimeSuffix();
-                    case InstanceState.Attached: return "外部服务 (" + ActivePort + ")" + RuntimeSuffix();
+                    // Attached = dsh serves the configured port but this manager
+                    // process did not spawn it (systemd-hosted unit, or a service
+                    // started before a manager restart). It IS the instance's own
+                    // service, so it reads as 运行中 too - the old 外部服务 wording
+                    // wrongly suggested an unrelated third-party service.
+                    case InstanceState.Attached: return "运行中 (" + where + ", " + ActivePort + ")" + RuntimeSuffix();
                     case InstanceState.Starting: return "启动中…";
                     case InstanceState.Stopped: return "未启动 · 未知版本";
                     case InstanceState.Error: return "错误: " + LastError;

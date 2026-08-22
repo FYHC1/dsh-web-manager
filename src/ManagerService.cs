@@ -279,7 +279,11 @@ namespace DshWebManager
             try
             {
                 EdgeWindow.EnsureVisible(c.Instance.Window, _config.DataDir, url, c.ActivePort);
-                _hadWindows[c] = true;
+                // Do NOT mark the window as present yet: it still has to materialize
+                // (up to ~1s on cold start). Setting true here made the next Tick
+                // log a spurious "App window closed" (and run a needless Preheat).
+                // The Tick sets it true once FindAppWindow actually sees the window.
+                _hadWindows[c] = false;
             }
             catch (Exception ex)
             {

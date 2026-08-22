@@ -254,3 +254,38 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | FFFF | 重开慢（根因定位） | 细粒度测量 | ✅ 第一次：hwnd +432ms/内容 +453ms；重开：hwnd +1041ms/内容 +1318ms——**Edge 重载 profile 状态（扩展/会话）使窗口创建慢 ~600ms**；窗口创建即可见（无隐藏），内容延迟为 dsh web UI JS 渲染（~350ms，本地 1.5MB 资源传输 <2ms，非网络） |
 | GGGG | 预热方案 | 关窗后 `--no-startup-window` 驻留 + 放宽 FindAppWindow 匹配转发窗口 | ✅ 重开 hwnd 降至 713~1108ms（平均优于冷启动 1041ms，存在波动）；关窗→预热→重开循环稳定；尺寸正确 1563×1020 |
 | HHHH | 中断部署恢复 | 部署中断致旧 exe 残留 + 端口接管 | ✅ 清理残留进程、确认 systemd 服务接管 3080（会话从磁盘恢复无损）、重启新 exe 管理器，双后端附着正常 |
+
+## 窗口尺寸彻底根治：WinEventHook 隐藏态调整 — 2026-08-23 实测
+
+用户反馈：快捷开窗时窗口先以错误尺寸弹出、随后立即调整——仍然可见地"跳"一下。
+本轮对 Edge 150 的尺寸通道做了完整的排除法实验（全新隔离 profile `C:\temp\test-prefs-9998`）：
+
+| # | 实验 | 结果 |
+|---|------|------|
+| IIII | `browser.app_window_placement`（--app 窗口专属键） | ❌ 关窗时 Edge **会写入**该键（值=实际窗口 945×1020@10,10），但启动时**不读取**：改成 1500×800@130,7 后重开仍 945×1020；关窗后又被写回实际值 |
+| JJJJ | `browser.window_placement`（常规窗口键） | ❌ 注入后重开仍 945×1020，同样被忽略 |
+| KKKK | 会话文件 | ❌ `Current Session` 等本就不存在（Edge 用 `Sessions`/`EdgeSessions` 目录），删除后行为不变 |
+| LLLL | `--start-minimized` | ❌ 被忽略：窗口创建即 `IsIconic=False / IsVisible=True`（Edge 150 与早期版本行为不同，旧 WWW 结论不再成立） |
+| MMMM | 945×1020 的来源 | 确认为 Edge 对 --app 窗口的**硬编码默认**（宽≈半屏-15，高≈工作区-20，@10,10）；Preferences/参数/会话全部无效 |
+| NNNN | 进程内多窗口陷阱 | 同一浏览器进程有**两个**可见 `Chrome_WidgetWin_1`：真正应用窗口（945×1020、有标题栏+可缩放、无 owner）与 Edge 气泡（344×206、`WS_POPUP`、owner=应用窗口）——调整尺寸必须精确区分，否则会把气泡放大 |
+| OOOO | WinEventHook 时序 | `EVENT_OBJECT_CREATE` 在窗口**隐藏态**触发，~80ms 后才 `EVENT_OBJECT_SHOW`——存在确定性的"显示前"窗口期 |
+
+**根治方案（已实现）**：`EnsureVisible` 启动前 arm 一个独立线程消息泵上的出进程
+WinEventHook（CREATE..SHOW，无 DLL 注入）；目标进程集合 = 该端口专属 profile 的现有
+浏览器进程（覆盖预热转发）+ 刚启动的 forwarder。回调过滤：顶层 `Chrome_WidgetWin_1`、
+无 owner、`WS_CAPTION`+`WS_THICKFRAME` 且非 `WS_POPUP`（排除气泡）。命中 CREATE 即
+`SetWindowPos` 记忆几何（窗口尚隐藏）；SHOW 时校验，异常则 hide→resize→show。
+原 150ms 轮询校正降级为兜底（命中即解除钩子；几何已正确时跳过冗余 SetWindowPos）。
+
+| # | 验证 | 结果 |
+|---|------|------|
+| PPPP | 预热重开（关窗→预热→`open wsl`，30ms 采样窗口矩形） | ✅ **首个样本即 1563×1020@130,7**（t=1110ms），4s 内零尺寸变化；日志 `sized window at CREATE (hidden)` → `shown at remembered size` |
+| QQQQ | 冷启动（杀光该 profile 全部 Edge 进程后 open） | ✅ 首个样本即 1563×1020@130,7（t=1219ms），5s 内零尺寸变化 |
+| RRRR | 窗口复用路径（已开窗再 open） | ✅ 正常前置，尺寸不变 |
+| SSSS | 附带修复 | `OpenWindowCore` 不再在窗口实体化前标记 `_hadWindows=true`，消除 Tick 误报"App window closed"+无效预热 |
+
+## 状态显示修复 — 2026-08-23
+
+| # | 问题 | 修复 |
+|---|------|------|
+| TTTT | 托盘两端都显示"状态：外部服务 (port)" | 根因：管理器重启后对既有服务重新附着（Attached），且 systemd 模式下服务恒由 systemd 托管 → 永远 Attached。`Attached` 的 StatusText 改为与 `Managed` 一致的"运行中 (后端, 端口)"+运行时摘要——它本就是该实例自己的 dsh 服务，"外部服务"措辞误导 |
