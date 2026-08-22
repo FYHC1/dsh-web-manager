@@ -237,3 +237,12 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 |---|------|------|------|
 | ZZZ | 最小化方案观感 | 打开 WSL 窗口 | ❌ 任务栏按钮 ~0.8s 出现但窗口 ~1.0s 才还原显示，用户感知"弹出慢" |
 | AAAA | 去最小化直接调整 | 正常启动（无 `--start-minimized`）+ 150ms 轮询启动进程 MainWindowHandle + 窗口出现即 `SetWindowPos` | ✅ 窗口一出现即可见（~0.8s），~0.2s 内调整到记忆尺寸 1665×1020；Launch→调整 ~1.0s；关窗重开稳定；无闪烁无隐藏；配置不覆盖 |
+
+## 弹出速度根治矩阵（关窗后 WSL 不关闭 + 移除 URL 门控）— 2026-08-22 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| BBBB | 关窗后 WSL 后端/虚拟机是否关闭 | 关 WSL 窗口后检查 | ✅ **不关闭**：CloseStopsService=false + 附着实例不受影响；VM 持续运行（uptime 1.6h+）、dsh 进程存活；"慢"另有原因 |
+| CCCC | 预热方案 | 关窗后 `--no-startup-window` 驻留 Edge | ❌ 结果不稳定（0.75s~1.9s），转发窗口 FindAppWindow 匹配困难 → **放弃** |
+| DDDD | URL 门控（根因） | WSL localhost 转发抖动时打开 | ❌ `WindowUrl` 返回空 → **5 秒重试**（日志 `URL not ready, scheduling retries`）→ "大部分时候慢" → **移除门控**：窗口立即打开，页面等转发恢复后自动加载；10s 后台可达性检查替代诊断气泡 |
+| EEEE | 移除门控后 | 打开/关窗重开 | ✅ 每次 ~1.0s（Edge 冷启动固有），尺寸 1665×1020 稳定，可达性检查不误报；FindAppWindow 放宽为按专属 profile 目录匹配（不再要求 --app=） |

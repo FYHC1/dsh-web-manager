@@ -266,20 +266,16 @@ namespace DshWebManager
             return _controllers.Count > 0 ? _controllers[0] : null;
         }
 
-        private const int WindowRetryMax = 4;   // 5 s apart -> ~20 s grace for WSL cold start
-
         private void OpenWindowCore(InstanceController c)
         {
-            string url = WindowUrl(c);
-            if (String.IsNullOrEmpty(url))
-            {
-                // WSL may be cold-starting: localhost forwarding can take several
-                // seconds (or longer) to come up after the distro boots. Retry in
-                // the background before declaring the service unreachable.
-                FileLog.Info("OpenWindow: URL not ready, scheduling retries (WSL cold start?)");
-                ScheduleWindowRetry(0, c);
-                return;
-            }
+            // Launch the window IMMEDIATELY with the deterministic URL. Previously
+            // the launch was gated on Windows-side reachability (WindowUrl returned
+            // empty whenever WSL localhost forwarding hiccuped), which turned a
+            // flaky forwarding into 5-second retry delays - the reported "mostly
+            // slow" window pop. The window now opens at once and loads the page as
+            // soon as the URL becomes reachable; a background check reports the
+            // genuinely-unreachable case instead of delaying the window.
+            string url = "http://127.0.0.1:" + c.ActivePort + "/";
             try
             {
                 EdgeWindow.EnsureVisible(c.Instance.Window, _config.DataDir, url, c.ActivePort);
@@ -290,53 +286,33 @@ namespace DshWebManager
                 FileLog.Error("OpenWindow failed: " + ex.Message);
                 var b = Balloon; if (b != null) b("dsh web manager", "打开窗口失败: " + ex.Message);
             }
+            ScheduleReachabilityCheck(c);
         }
 
-        private void ScheduleWindowRetry(int attempt, InstanceController c)
+        /// <summary>Background diagnostic: ~10s after opening, if the service is
+        /// still not reachable from Windows (WSL forwarding off / service down),
+        /// tell the user why instead of leaving them staring at an error page.</summary>
+        private void ScheduleReachabilityCheck(InstanceController c)
         {
-            if (attempt >= WindowRetryMax)
-            {
-                FileLog.Error("OpenWindow: no usable URL after " + WindowRetryMax + " retries");
-                var b = Balloon;
-                if (b == null) return;
-                bool serviceUp = false;
-                try { serviceUp = c.Backend.IsServiceUp(c.ActivePort); }
-                catch { }
-                if (serviceUp)
-                    b("dsh web manager", "WSL 服务在运行，但 localhostForwarding 关闭，Windows 无法访问；请开启 localhostForwarding 或在 WSL 内使用浏览器");
-                else
-                    b("dsh web manager", "WSL 服务未就绪：请检查所选发行版是否正确（配置 wslDistro 或查看托盘「后端」状态）、该发行版内是否安装 dsh");
-                return;
-            }
+            int port = c.ActivePort;
             ThreadPool.QueueUserWorkItem(_ =>
             {
-                Thread.Sleep(5000);
                 try
                 {
-                    string url = WindowUrl(c);
-                    if (!String.IsNullOrEmpty(url))
-                    {
-                        EdgeWindow.EnsureVisible(c.Instance.Window, _config.DataDir, url, c.ActivePort);
-                        _hadWindows[c] = true;
-                        FileLog.Info("OpenWindow: retry succeeded after ~" + ((attempt + 1) * 5) + "s");
-                        return;
-                    }
-                    ScheduleWindowRetry(attempt + 1, c);
+                    Thread.Sleep(10000);
+                    if (PortInspector.IsListening(port)) return; // reachable now
+                    bool serviceUp = false;
+                    try { serviceUp = c.Backend.IsServiceUp(port); }
+                    catch { }
+                    var b = Balloon;
+                    if (b == null) return;
+                    if (serviceUp)
+                        b("dsh web manager", "服务在运行，但 Windows 暂时无法访问 (localhostForwarding 关闭？)；窗口稍后会自动加载");
+                    else
+                        b("dsh web manager", "WSL 服务未就绪：请检查发行版配置（wslDistro）或该发行版内是否安装 dsh");
                 }
-                catch (Exception ex)
-                {
-                    FileLog.Error("OpenWindow retry failed: " + ex.Message);
-                    ScheduleWindowRetry(attempt + 1, c);
-                }
+                catch (Exception ex) { FileLog.Error("ReachabilityCheck: " + ex.Message); }
             });
-        }
-
-        /// <summary>Window URL for the active backend/port (empty = not reachable from Windows).</summary>
-        private string WindowUrl(InstanceController c)
-        {
-            try { return c.Backend.GetWindowUrl(c.ActivePort); }
-            catch (Exception ex) { FileLog.Error("WindowUrl failed: " + ex.Message); }
-            return "http://127.0.0.1:" + c.ActivePort + "/";
         }
 
         /// <summary>Throttled dsh update check; balloons when a newer version exists.</summary>

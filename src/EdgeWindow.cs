@@ -70,13 +70,13 @@ namespace DshWebManager
             }
 
             FileLog.Info("Launching Edge app window: " + args);
-            // Edge startup boost keeps headless processes alive per profile; a
-            // second launch with the same --user-data-dir gets forwarded to them
-            // and the size/position flags are dropped. Kill lingering background
-            // processes for this profile so the new process is fresh. Only reached
-            // when no visible window exists for the port, so nothing user-visible
-            // is interrupted.
-            KillLingeringEdge(dataDir);
+            // Do NOT kill lingering Edge background processes: after a window
+            // close, Edge startup boost keeps a warm process for the profile.
+            // Forwarding to it makes the next open nearly instant (a cold start
+            // with this profile's extensions takes ~1s+). The size no longer
+            // depends on the command line (RestoreGeometry enforces it), so a
+            // forwarded launch is fine - the WMI fallback in the enforcement
+            // poll finds the window created by the existing process.
             lock (_launchAt) { _launchAt[port] = DateTime.Now; } // hold CaptureSize off for a while
             ProcessStartInfo psi = new ProcessStartInfo(edge, args);
             psi.UseShellExecute = false;
@@ -90,32 +90,6 @@ namespace DshWebManager
         private static readonly System.Collections.Generic.Dictionary<int, DateTime> _launchAt =
             new System.Collections.Generic.Dictionary<int, DateTime>();
         private static readonly TimeSpan CaptureHoldoff = TimeSpan.FromSeconds(6);
-
-        /// <summary>Kills headless/background Edge processes for one dedicated
-        /// profile dir (never windows with a visible main window).</summary>
-        private static void KillLingeringEdge(string dataDir)
-        {
-            try
-            {
-                _procCache = null; // force a fresh process snapshot
-                string needle = dataDir + "\"";
-                foreach (EdgeProcInfo info in GetEdgeProcesses())
-                {
-                    if (info.CommandLine.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                    try
-                    {
-                        using (Process p = Process.GetProcessById((int)info.Pid))
-                        {
-                            if (p.MainWindowHandle != IntPtr.Zero) continue; // visible window: never kill
-                            p.Kill();
-                            FileLog.Info("Killed lingering Edge process " + info.Pid + " for " + dataDir);
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch (Exception ex) { FileLog.Error("KillLingeringEdge: " + ex.Message); }
-        }
 
         /// <summary>One msedge/chrome process snapshot (pid + command line).</summary>
         private sealed class EdgeProcInfo
@@ -169,15 +143,17 @@ namespace DshWebManager
         }
 
         /// <summary>
-        /// Finds the Edge/Chrome app window serving exactly this port. Strictly scoped:
-        /// command line must contain "--app=" and ":PORT" and must NOT contain "--type="
-        /// (which marks internal renderer/helper processes), so other Edge windows are never touched.
+        /// Finds the Edge/Chrome app window serving exactly this port. The owning
+        /// process is matched by the dedicated per-port user-data-dir suffix
+        /// ("...-3081\""); command line must NOT contain "--type=" (renderer/GPU/
+        /// utility helpers). The profile dir is exclusively ours, so no --app=
+        /// /:port requirement is needed - that also matches a forwarded window
+        /// created by a preheated (--no-startup-window) warm process.
         /// </summary>
         public static IntPtr FindAppWindow(int port)
         {
             try
             {
-                string needle = ":" + port;
                 // Only match windows whose user-data-dir carries the per-port suffix
                 // ("...-3081\""). Stale windows from the old shared profile would
                 // otherwise be "found" and restored instead of launching a real
@@ -187,8 +163,6 @@ namespace DshWebManager
                 foreach (EdgeProcInfo info in GetEdgeProcesses())
                 {
                     if (info.CommandLine.IndexOf("--type=", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                    if (info.CommandLine.IndexOf("--app=", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                    if (info.CommandLine.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
                     if (info.CommandLine.IndexOf(dataNeedle, StringComparison.OrdinalIgnoreCase) < 0) continue;
                     pids.Add(info.Pid);
                 }
@@ -243,12 +217,14 @@ namespace DshWebManager
 
         /// <summary>Background pass right after a launch: poll for the window to
         /// appear, then restore it at the remembered geometry (the window was
-        /// started minimized so the wrong-size state is never visible). Polling
-        /// the launched process's MainWindowHandle is fast (no WMI, no 2s cache),
-        /// so the window is un-minimized within ~150 ms of creation - the earlier
-        /// FindAppWindow polling (2s cache + 500ms interval) made the window pop
-        /// ~2.5s late. The snapshot keeps working even if CaptureSize later
-        /// overwrites the shared WindowConfig with the wrong actual size.</summary>
+        /// <summary>Background pass right after a launch: poll for the window to
+        /// appear, then apply the remembered geometry as soon as it does. The
+        /// launched process may be a short-lived forwarder (Edge startup boost
+        /// holds a warm background process for the profile, which creates the
+        /// window), so each iteration checks BOTH the launched process's
+        /// MainWindowHandle (fast) and a fresh-WMI FindAppWindow (catches the
+        /// forwarded window). The snapshot keeps working even if CaptureSize
+        /// later overwrites the shared WindowConfig with the wrong size.</summary>
         private static void ScheduleGeometryEnforce(int port, WindowConfig snapshot, Process launched)
         {
             System.Threading.ThreadPool.QueueUserWorkItem(_ =>
@@ -266,11 +242,12 @@ namespace DshWebManager
                                 using (Process p = Process.GetProcessById(launched.Id))
                                     h = p.MainWindowHandle;
                             }
-                            catch { } // process exited / re-exec'd
+                            catch { } // process exited / re-exec'd / forwarded
                         }
-                        if (h == IntPtr.Zero && (i % 4) == 3)
+                        if (h == IntPtr.Zero)
                         {
-                            // Fallback: fresh WMI snapshot (handles Edge re-exec).
+                            // Fresh WMI snapshot: catches the window when the
+                            // launch was forwarded to a warm Edge process.
                             _procCache = null;
                             h = FindAppWindow(port);
                         }
