@@ -187,25 +187,21 @@ namespace DshWebManager
             }
         }
 
-        /// <summary>Applies the DSH icon (32px taskbar big / 16px small) to the app window.</summary>
+        /// <summary>Applies the DSH icon (32px big / 16px small) + AUMID to the app window.
+        /// Done once per window handle: the icon/AUMID persist, so re-sending every
+        /// tick was pure overhead (and the cross-process SendMessage could stall).</summary>
         public static void ApplyIconToWindow(int port)
         {
             IntPtr h = FindAppWindow(port);
             if (h == IntPtr.Zero) return;
+            if (h == _lastAumidHwnd) return; // already applied to this window
+            _lastAumidHwnd = h;
             EnsureIcons();
             if (_bigIcon != IntPtr.Zero)
                 Win32.SendMessageW(h, Win32.WM_SETICON, new IntPtr(Win32.ICON_BIG), _bigIcon);
             if (_smallIcon != IntPtr.Zero)
                 Win32.SendMessageW(h, Win32.WM_SETICON, new IntPtr(Win32.ICON_SMALL), _smallIcon);
-            // Taskbar icon is driven by the window's AppUserModelID: give the app
-            // window a stable AUMID whose relaunch icon is the official DSH .ico.
-            // Only applied once per window handle (property set is idempotent and
-            // re-applying would leak COM references).
-            if (h != _lastAumidHwnd)
-            {
-                _lastAumidHwnd = h;
-                ApplyAumidToWindow(h, "DeepSeekHarness.WebUI", AppPaths.IconFile);
-            }
+            ApplyAumidToWindow(h, "DeepSeekHarness.WebUI", AppPaths.IconFile);
         }
 
         /// <summary>

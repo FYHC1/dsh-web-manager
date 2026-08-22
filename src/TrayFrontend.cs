@@ -126,6 +126,10 @@ namespace DshWebManager
             _menu = new ContextMenuStrip();
             _menu.Renderer = new ToolStripProfessionalRenderer(new TrayColorTable());
             _menu.ShowImageMargin = false;
+            // Double-buffer the dropdown so hover repaints don't flicker/lag.
+            System.Reflection.PropertyInfo pi = typeof(ToolStrip).GetProperty(
+                "DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            if (pi != null) pi.SetValue(_menu, true, null);
             _menu.Items.Add(switcherHost);        // 顶部: 横向 Windows/WSL 切换按钮
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(new ToolStripMenuItem(MenuOpen, null, delegate { _service.OpenWindow(); }));
