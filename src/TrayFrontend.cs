@@ -24,6 +24,8 @@ namespace DshWebManager
             new System.Collections.Generic.List<ToolStripMenuItem>();
         private ToolStripMenuItem _instancesMenu;
         private int _menuFixedBottom = -1;
+        private string _pendingStatus;
+        private bool _statusFlushPending;
         private bool _closing;
 
         private static string MenuOpen = "\u6253\u5f00\u7a97\u53e3";            // 打开窗口
@@ -70,7 +72,7 @@ namespace DshWebManager
             _btnWindows.Width = 96;
             _btnWindows.Height = 30;
             _btnWindows.Cursor = Cursors.Hand;
-            _btnWindows.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); };
+            _btnWindows.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); AnchorMenuBottom(); };
 
             _btnWsl = new Button();
             _btnWsl.Text = MenuBackendWsl;
@@ -79,7 +81,7 @@ namespace DshWebManager
             _btnWsl.Width = 96;
             _btnWsl.Height = 30;
             _btnWsl.Cursor = Cursors.Hand;
-            _btnWsl.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); };
+            _btnWsl.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); AnchorMenuBottom(); };
 
             FlowLayoutPanel switcher = new FlowLayoutPanel();
             switcher.FlowDirection = FlowDirection.LeftToRight;
@@ -303,15 +305,32 @@ namespace DshWebManager
 
         public void UpdateStatus(string text)
         {
+            // StatusChanged fires from background threads (timer tick, thread pool,
+            // control pipe). Coalesce: only ONE flush is queued at a time, always
+            // carrying the newest text, so a burst of events cannot flood the UI
+            // thread message queue (which caused tray lag / menu re-layout churn).
+            if (InvokeRequired)
+            {
+                _pendingStatus = text;
+                if (_statusFlushPending) return;
+                _statusFlushPending = true;
+                try { BeginInvoke(new Action(FlushStatus)); }
+                catch { _statusFlushPending = false; }
+                return;
+            }
+            UpdateStatusCore(text);
+        }
+
+        private void FlushStatus()
+        {
+            _statusFlushPending = false;
+            UpdateStatusCore(_pendingStatus);
+        }
+
+        private void UpdateStatusCore(string text)
+        {
             try
             {
-                // StatusChanged fires from background threads (timer tick, thread pool,
-                // control pipe): marshal onto the UI thread before touching controls.
-                if (InvokeRequired)
-                {
-                    BeginInvoke(new Action<string>(UpdateStatus), text);
-                    return;
-                }
                 // Show the active instance's compact StatusText (with runtime summary)
                 // instead of the raw event message, so the tray stays short/consistent.
                 InstanceController active = _service.Controller;
@@ -320,16 +339,32 @@ namespace DshWebManager
                 int sep = display.IndexOf(" · ");
                 if (sep >= 0)
                     display = display.Substring(0, sep) + Environment.NewLine + "  " + display.Substring(sep + 3);
-                if (_statusItem != null) _statusItem.Text = MenuStatus + ": " + display;
-                _notify.Text = Title + " - " + status;
+                // Only touch controls whose text actually changed: setting Text on a
+                // ToolStrip item triggers a re-measure, and doing it on every event
+                // churned the layout (menu height/width jumps, hover paint lost).
+                if (_statusItem != null)
+                {
+                    string newText = MenuStatus + ": " + display;
+                    if (_statusItem.Text != newText) _statusItem.Text = newText;
+                }
+                string notifyText = Title + " - " + status;
+                if (_notify.Text != notifyText) _notify.Text = notifyText;
                 RefreshBackendCheck();
                 for (int i = 0; i < _instanceItems.Count && i < _service.Controllers.Count; i++)
                 {
                     ToolStripMenuItem item = _instanceItems[i];
                     InstanceController ic = _service.Controllers[i];
-                    item.Text = InstanceLabel(ic);
+                    string label = InstanceLabel(ic);
+                    if (item.Text != label) item.Text = label;
                     if (item.DropDownItems.Count >= 5)
-                        item.DropDownItems[4].Text = MenuStatus + ": " + ic.StatusText;
+                    {
+                        ToolStripMenuItem si = item.DropDownItems[4] as ToolStripMenuItem;
+                        if (si != null)
+                        {
+                            string st = MenuStatus + ": " + ic.StatusText;
+                            if (si.Text != st) si.Text = st;
+                        }
+                    }
                 }
             }
             catch { }
@@ -344,28 +379,26 @@ namespace DshWebManager
                 Color inactive = SystemColors.Control;
                 if (_btnWindows != null)
                 {
-                    _btnWindows.BackColor = wsl ? inactive : active;
-                    _btnWindows.ForeColor = wsl ? Color.FromArgb(0x33, 0x33, 0x33) : Color.White;
+                    Color bg = wsl ? inactive : active;
+                    Color fg = wsl ? Color.FromArgb(0x33, 0x33, 0x33) : Color.White;
+                    if (_btnWindows.BackColor != bg) _btnWindows.BackColor = bg;
+                    if (_btnWindows.ForeColor != fg) _btnWindows.ForeColor = fg;
                 }
                 if (_btnWsl != null)
                 {
-                    _btnWsl.BackColor = wsl ? active : inactive;
-                    _btnWsl.ForeColor = wsl ? Color.White : Color.FromArgb(0x33, 0x33, 0x33);
+                    Color bg = wsl ? active : inactive;
+                    Color fg = wsl ? Color.White : Color.FromArgb(0x33, 0x33, 0x33);
+                    if (_btnWsl.BackColor != bg) _btnWsl.BackColor = bg;
+                    if (_btnWsl.ForeColor != fg) _btnWsl.ForeColor = fg;
                 }
-                if (_modeMenu != null) _modeMenu.Visible = wsl; // Windows 后端隐藏 WSL 服务模式
+                if (_modeMenu != null && _modeMenu.Visible != wsl) _modeMenu.Visible = wsl;
                 bool defWsl = String.Equals(_service.DefaultBackend, "wsl", StringComparison.OrdinalIgnoreCase);
-                if (_defaultWslItem != null) _defaultWslItem.Checked = defWsl;
-                if (_defaultWindowsItem != null) _defaultWindowsItem.Checked = !defWsl;
+                if (_defaultWslItem != null && _defaultWslItem.Checked != defWsl) _defaultWslItem.Checked = defWsl;
+                if (_defaultWindowsItem != null && _defaultWindowsItem.Checked != !defWsl) _defaultWindowsItem.Checked = !defWsl;
                 bool systemd = wsl
                     && String.Equals(_service.Config.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
-                if (_modeSystemdItem != null) _modeSystemdItem.Checked = systemd;
-                if (_modeWrapperItem != null) _modeWrapperItem.Checked = !systemd;
-                // Keep the menu's bottom edge fixed while it is open and its height changed.
-                if (_menu.Visible && _menuFixedBottom > 0)
-                {
-                    Size sz = _menu.GetPreferredSize(Size.Empty);
-                    _menu.Top = _menuFixedBottom - sz.Height;
-                }
+                if (_modeSystemdItem != null && _modeSystemdItem.Checked != systemd) _modeSystemdItem.Checked = systemd;
+                if (_modeWrapperItem != null && _modeWrapperItem.Checked != !systemd) _modeWrapperItem.Checked = !systemd;
             }
             catch { }
         }
