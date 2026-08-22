@@ -289,3 +289,26 @@ WinEventHook（CREATE..SHOW，无 DLL 注入）；目标进程集合 = 该端口
 | # | 问题 | 修复 |
 |---|------|------|
 | TTTT | 托盘两端都显示"状态：外部服务 (port)" | 根因：管理器重启后对既有服务重新附着（Attached），且 systemd 模式下服务恒由 systemd 托管 → 永远 Attached。`Attached` 的 StatusText 改为与 `Managed` 一致的"运行中 (后端, 端口)"+运行时摘要——它本就是该实例自己的 dsh 服务，"外部服务"措辞误导 |
+
+## 关闭实例/退出真正生效：Attached 服务可停止 — 2026-08-23
+
+用户反馈：关闭 WSL 实例后状态仍显示运行中；退出管理器后未打开过的 Windows 端也显示运行中。
+
+**根因**：管理器重启会丢失进程所有权（两侧都变 Attached），而旧 `Stop()` 对 Attached
+只解除附着、不停止服务；5 秒心跳探测到端口仍在服务又自动重新附着——关闭操作看起来
+完全无效。Windows 端的"幽灵运行"是更早一次管理器会话启动的服务在多次部署重启后残留。
+
+**修复**：
+- `IServiceBackend.Stop()` → `Stop(int port)`；Attached 与 Managed 一样被真正停止：
+  - Windows：运行时桥接优雅关闭（仅持有本配置 token 的 dsh 会响应，绝不误杀无关进程）→ 仍占用时精确杀监听进程（仅经验证的 dsh 进程）。
+  - WSL systemd：`systemctl --user stop dsh-web-<port>.service`；单元外附着的 dsh 走桥接→发行版内按端口属主精确 kill（仅验证为 dsh 才杀）。
+  - WSL wrapper：桥接 + pkill 脚本 + 端口属主兜底。
+- 显式停止后 15s 内抑制心跳重附着（`_suppressAttachUntil`），避免慢退出把状态弹回"运行中"。
+- 新增控制命令 `closeinstance windows|wsl`（菜单「关闭实例」同一代码路径，可无头脚本化）。
+- 预热仅在服务仍运行时执行（关闭实例后不再空烧 ~150MB 驻留 Edge）。
+
+| # | 验证 | 结果 |
+|---|------|------|
+| UUUU | `closeinstance windows`（3081 为 Attached） | ✅ 桥接优雅关闭 `{"ok":true,"shuttingDown":true}`；12s/24s 后端口仍空闲（无重附着）；日志 `Stopping dsh (Windows 本机, port 3081, state Attached)` → `服务已停止` |
+| VVVV | 停止后 `open windows` 恢复 | ✅ 服务以 Managed 重启（wrapper pid 可见），窗口经几何钩子以记忆尺寸 1611×1020@122,28 一次弹出 |
+| WWWW | 语义说明 | 关闭**窗口**（X 按钮）默认不停服务（CloseStopsService=false，快速重开设计）；「关闭实例」停服务+关窗；退出管理器在 ExitKeepService=false 时停止全部实例（含 systemd 单元，会断开其上的活动会话） |

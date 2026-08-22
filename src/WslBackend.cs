@@ -272,27 +272,32 @@ namespace DshWebManager
             catch { return false; }
         }
 
-        public void Stop()
+        public void Stop(int port)
         {
             if (_mode == WslServiceModeKind.Systemd)
             {
-                string unit = "dsh-web-" + _lastPort + ".service";
-                FileLog.Info("WslBackend: systemctl --user stop " + unit);
-                WslTools.Systemctl(_distro, "stop", unit);
-                // systemctl stop is asynchronous: wait until the port is actually
-                // released so an immediate follow-up start reuses the same port.
-                int released = _lastPort;
-                for (int i = 0; i < 10 && WslTools.WslPortOwnerPid(_distro, released) > 0; i++)
-                    System.Threading.Thread.Sleep(300);
+                string unit = "dsh-web-" + port + ".service";
+                if (WslTools.SystemctlIsActive(_distro, port))
+                {
+                    FileLog.Info("WslBackend: systemctl --user stop " + unit);
+                    WslTools.Systemctl(_distro, "stop", unit);
+                }
+                // Covers BOTH the unit we just stopped (wait for the port to
+                // release) and an attached dsh that runs OUTSIDE our unit
+                // (e.g. started manually or by an older manager): bridge
+                // shutdown, then a targeted kill of the port owner - only
+                // ever a verified dsh process.
+                StopDshInsideDistro(port);
                 StopKeepalive();
                 _lastPort = 0;
                 return;
             }
             // Graceful shutdown first: ask the in-dsh runtime bridge to terminate
-            // cleanly, then fall back to the hard kill if it is not answering.
-            if (_lastPort > 0 && !String.IsNullOrEmpty(_config.BridgeToken))
+            // cleanly (only a dsh carrying our token answers), then fall back to
+            // the hard kill if it is not answering.
+            if (port > 0 && !String.IsNullOrEmpty(_config.BridgeToken))
             {
-                string resp = WslTools.BridgeQuery(BridgePort(_lastPort), _config.BridgeToken, "shutdown", 2000);
+                string resp = WslTools.BridgeQuery(BridgePort(port), _config.BridgeToken, "shutdown", 2000);
                 if (resp != null)
                 {
                     FileLog.Info("WslBackend: bridge shutdown requested (" + resp + ")");
@@ -311,9 +316,33 @@ namespace DshWebManager
                 // Give the client a moment to exit on its own.
                 System.Threading.Thread.Sleep(500);
             }
+            StopDshInsideDistro(port);
             int pid = ManagedPid;
             if (pid > 0) DshLauncher.KillTree(pid);
             _proc = null;
+        }
+
+        /// <summary>Waits for the port inside the distro to release; if a dsh
+        /// still owns it (attached service that ignored the graceful paths),
+        /// kills exactly that process - and nothing else.</summary>
+        private void StopDshInsideDistro(int port)
+        {
+            try
+            {
+                if (String.IsNullOrEmpty(_distro) || port <= 0) return;
+                for (int i = 0; i < 10 && WslTools.WslPortOwnerPid(_distro, port) > 0; i++)
+                    System.Threading.Thread.Sleep(300);
+                int owner = WslTools.WslPortOwnerPid(_distro, port);
+                if (owner <= 0) return;
+                if (!WslTools.WslPortHasDsh(_distro, port))
+                {
+                    FileLog.Info("WslBackend.Stop: port " + port + " owner pid=" + owner + " is not dsh; leaving it alone");
+                    return;
+                }
+                FileLog.Info("WslBackend.Stop: killing dsh pid=" + owner + " on port " + port + " in " + _distro);
+                WslTools.RunCapture(_distro, "bash", new string[] { "-lc", "kill " + owner + " 2>/dev/null; true" }, 5000);
+            }
+            catch (Exception ex) { FileLog.Error("StopDshInsideDistro: " + ex.Message); }
         }
 
         /// <summary>

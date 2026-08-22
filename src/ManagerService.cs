@@ -809,12 +809,42 @@ namespace DshWebManager
                     var b = Balloon; if (b != null) b("dsh web manager", "窗口已关闭，服务已停止");
                 }
                 // Default: service keeps running; tray can re-open the window anytime.
-                // Keep the browser warm: a preheated window-less Edge makes the next
-                // open ~600ms faster (the profile state reload on cold start is the
-                // measured reopen slowdown).
-                EdgeWindow.Preheat(port, _config.DataDir);
+                // Keep the browser warm ONLY while the service still runs: after
+                // 关闭实例 there is nothing to reopen and a warm window-less Edge
+                // would just idle ~150MB for nothing.
+                if (c.State == InstanceState.Managed || c.State == InstanceState.Attached)
+                    EdgeWindow.Preheat(port, _config.DataDir);
             }
             _hadWindows[c] = hasWindow;
+        }
+
+        /// <summary>Stops one instance's service and closes its window (menu 关闭实例;
+        /// also reachable headlessly via the control action "closeinstance &lt;backend&gt;").
+        /// Runs off the UI thread: WSL stops can take seconds.</summary>
+        public void CloseInstance(int index)
+        {
+            InstanceController c = GetController(index);
+            if (c == null) return;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { c.Stop(false); }
+                catch (Exception ex) { FileLog.Error("CloseInstance stop: " + ex.Message); }
+                try { EdgeWindow.CloseWindow(c.ActivePort); }
+                catch (Exception ex) { FileLog.Error("CloseInstance window: " + ex.Message); }
+            });
+        }
+
+        /// <summary>CloseInstance by backend name ("windows" / "wsl").</summary>
+        public void CloseInstanceBackend(string backend)
+        {
+            InstanceController c = GetControllerForBackend(backend);
+            if (c == null)
+            {
+                Balloon("dsh web manager", "未找到后端: " + backend);
+                return;
+            }
+            int index = _controllers.IndexOf(c);
+            CloseInstance(index >= 0 ? index : 0);
         }
 
         private void Tick(object state)

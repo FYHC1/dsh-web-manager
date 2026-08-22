@@ -267,21 +267,7 @@ namespace DshWebManager
 
         private void CloseInstance(int index)
         {
-            InstanceController c = _service.GetController(index);
-            if (c == null) return;
-            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
-            {
-                try
-                {
-                    c.Stop(false); // stop the service (managed: full stop; attached: detach)
-                }
-                catch (Exception ex) { FileLog.Error("CloseInstance stop: " + ex.Message); }
-                try
-                {
-                    EdgeWindow.CloseWindow(c.ActivePort);
-                }
-                catch (Exception ex) { FileLog.Error("CloseInstance window: " + ex.Message); }
-            });
+            _service.CloseInstance(index);
         }
 
         /// <summary>Rebuilds the instance submenu from the live controller list (v3.0 P2-2).</summary>

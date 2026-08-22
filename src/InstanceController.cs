@@ -42,6 +42,7 @@ namespace DshWebManager
         private DateTime _windowStart = DateTime.MinValue;
         private int _crashCount;
         private DateTime _lastStopProbeUtc = DateTime.MinValue;
+        private DateTime _suppressAttachUntil = DateTime.MinValue;
 
         public event Action<string> StatusChanged;
 
@@ -219,28 +220,35 @@ namespace DshWebManager
             return -1;
         }
 
-        /// <summary>Stops the managed service (attached services are left alone).</summary>
+        /// <summary>Stops the instance's service. Attached services are stopped
+        /// too: "attached" only means this manager run did not SPAWN the process
+        /// (a systemd-hosted unit, or a service started before a manager restart)
+        /// - it is still the instance's own dsh on its configured port. The old
+        /// detach-only behaviour left the service running and the 5s heartbeat
+        /// re-attached within seconds, so 关闭实例/退出 looked completely inert.</summary>
         public void Stop(bool force)
         {
             lock (_sync)
             {
-                bool owned = State == InstanceState.Managed
+                bool active = State == InstanceState.Managed
                     || State == InstanceState.Starting
-                    || State == InstanceState.Error;
-                if (owned && (_backend.IsWrapperAlive() || _backend.ManagedPid > 0))
+                    || State == InstanceState.Error
+                    || State == InstanceState.Attached;
+                if (active)
                 {
-                    // Also cleans up a backend whose start failed part-way (Error/Starting):
-                    // a spawned wsl.exe / script must not outlive the manager.
-                    FileLog.Info("Stopping managed dsh (" + _backend.Describe() + ")");
-                    _backend.Stop();
+                    FileLog.Info("Stopping dsh (" + _backend.Describe() + ", port " + ActivePort
+                        + ", state " + State + ")");
+                    try { _backend.Stop(ActivePort); }
+                    catch (Exception ex) { FileLog.Error("Stop backend failed: " + ex.Message); }
+                    bool released = false;
+                    try { released = !_backend.IsServiceUp(ActivePort); } catch { }
                     State = InstanceState.Stopped;
-                    FireStatus("服务已停止");
-                }
-                else if (State == InstanceState.Attached)
-                {
-                    // We do not own the attached process; just detach.
-                    State = InstanceState.Stopped;
-                    FireStatus("已解除对外部服务的附着");
+                    LastError = null;
+                    // An explicit stop must not be instantly undone by the
+                    // stopped-probe re-attach (a slow shutdown would otherwise
+                    // flip the tray back to 运行中 within 5 seconds).
+                    _suppressAttachUntil = DateTime.UtcNow.AddSeconds(15);
+                    FireStatus(released ? "服务已停止" : "已发送停止指令，服务退出中");
                 }
                 else
                 {
@@ -267,9 +275,12 @@ namespace DshWebManager
             {
                 if (State == InstanceState.Stopped)
                 {
-                    // An external dsh may still be serving (e.g. an attached instance was
-                    // detached by "close instance" but its process keeps running). Probe
-                    // periodically and re-attach so the tray reflects reality.
+                    // Right after an explicit 关闭实例/退出 the port may still be
+                    // draining; do not re-attach during that window.
+                    if (DateTime.UtcNow < _suppressAttachUntil) return;
+                    // An external dsh may still be serving (e.g. the user started
+                    // one by hand on the instance port). Probe periodically and
+                    // re-attach so the tray reflects reality.
                     if (DateTime.UtcNow.Subtract(_lastStopProbeUtc) < TimeSpan.FromSeconds(5)) return;
                     _lastStopProbeUtc = DateTime.UtcNow;
                     try

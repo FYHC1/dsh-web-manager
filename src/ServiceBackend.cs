@@ -25,7 +25,7 @@ namespace DshWebManager
         PortProbeResult ProbePort(int port);         // attach / fallback decision
         bool Start(int port, string profile);        // launch the service, returns success
         bool IsWrapperAlive();                       // the launched wrapper process still alive
-        void Stop();                                 // stop the managed service (attached never touched)
+        void Stop(int port);                         // stop the instance's service (managed AND attached)
         bool IsServiceUp(int port);                  // backend-aware liveness (wait-ready + heartbeat)
         string GetWindowUrl(int port);               // URL the Edge window opens (WSL IP when forwarding is off)
         void RefreshRuntime(int port);               // throttled runtime-bridge refresh (no-op if none; v3.0)
@@ -112,17 +112,31 @@ namespace DshWebManager
             catch { return false; }
         }
 
-        public void Stop()
+        public void Stop(int port)
         {
             // Graceful shutdown first: ask the in-dsh runtime bridge to terminate
-            // cleanly, then fall back to the hard kill if it is not answering.
-            string resp = RuntimeBridgeClient.Shutdown(_lastPort, _config.BridgeToken);
-            if (resp != null)
+            // cleanly. The bridge only answers on a dsh configured with OUR token,
+            // so this is safe for attached services too (a foreign dsh simply does
+            // not respond) - attached means "this manager did not spawn it in the
+            // CURRENT run" (a manager restart loses process ownership), it is still
+            // the instance's own service and 关闭实例/退出 must actually stop it.
+            if (port > 0 && !String.IsNullOrEmpty(_config.BridgeToken))
             {
-                FileLog.Info("WindowsBackend: bridge shutdown requested (" + resp + ")");
-                System.Threading.Thread.Sleep(1200); // give dsh a moment to exit
+                string resp = RuntimeBridgeClient.Shutdown(port, _config.BridgeToken);
+                if (resp != null)
+                {
+                    FileLog.Info("WindowsBackend: bridge shutdown requested (" + resp + ")");
+                    System.Threading.Thread.Sleep(1200); // give dsh a moment to exit
+                }
             }
             int pid = ManagedPid;
+            if (pid == 0 && port > 0 && PortInspector.IsListening(port))
+            {
+                // Still serving: stop the listener of THIS instance's port, but
+                // only ever a verified dsh process (never a third-party program).
+                int listener = PortInspector.GetListenerPid(port);
+                if (listener > 0 && PortInspector.IsDshProcess(listener)) pid = listener;
+            }
             if (pid > 0) DshLauncher.KillTree(pid);
             _proc = null;
         }

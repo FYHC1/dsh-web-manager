@@ -129,6 +129,8 @@ namespace DshWebManager
                     _service.SetBackend(action.Substring("backend ".Length).Trim());
                 else if (action.StartsWith("wslmode ", StringComparison.OrdinalIgnoreCase))
                     _service.SetWslMode(action.Substring("wslmode ".Length).Trim());
+                else if (action.StartsWith("closeinstance ", StringComparison.OrdinalIgnoreCase))
+                    _service.CloseInstanceBackend(action.Substring("closeinstance ".Length).Trim());
             }
             catch (Exception ex)
             {
