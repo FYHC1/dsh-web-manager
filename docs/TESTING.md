@@ -109,9 +109,9 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 
 ## v3.0 Runtime Bridge 矩阵（权威状态 + 优雅停止）— 2026-08-21 实测
 
-> 注入方式：把 `plugins/dsh-runtime-bridge`（package.json + cordis.patch.yml + lib/index.js）
-> 拷贝进 profile 的 `node_modules/dsh-runtime-bridge/`，并在 profile `cordis.patch.yml` 末尾
-> insert `{ id: dsh-runtime-bridge, name: 'dsh-runtime-bridge' }`（**WSL 与 Windows 两侧 profile 都做**）。
+> 注入方式：`dsh plugin --profile web add dsh-web-manager`（或 `file:`/`github:` 本地/仓库安装）。
+> 该包经 `package.json` 的 `dsh.bundle.patch` 自动追加进 `dsh.profile.bundles`，桥插件自动参与组合
+> （**WSL 与 Windows 两侧 profile 都装**）。旧的 `plugins/dsh-runtime-bridge` 手动拷贝注入已废弃。
 > 管理器启动 dsh 时注入 `DSH_BRIDGE_PORT=<port+100>` / `DSH_BRIDGE_TOKEN` / `DSH_PROFILE` / `DSH_WEB_PORT`。
 
 | # | 场景 | 操作 | 结果 |

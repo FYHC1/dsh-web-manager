@@ -8,7 +8,7 @@ namespace DshWebManager
     /// <summary>
     /// Parsed runtime-bridge payload: the authoritative state of a running dsh web
     /// service (its dsh version, node runtime, uptime), as reported by the in-dsh
-    /// runtime bridge (plugins/dsh-runtime-bridge) over the versioned JSON protocol.
+    /// runtime bridge (the dsh-web-manager bundle) over the versioned JSON protocol.
     /// </summary>
     public sealed class BridgeInfo
     {

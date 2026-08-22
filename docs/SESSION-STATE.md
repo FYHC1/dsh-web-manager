@@ -1,4 +1,4 @@
-﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
+﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
 
 > 本文件用途：会话压缩/恢复时读取，重建关键事实与未完成事项。
 > 最后更新：2026-08-22 默认启动后端勾选指示修复后
@@ -129,8 +129,9 @@
    - （已修复的真实故障）发行版自动选择记忆：LastWslDistro=FedoraLinux 已持久化，
      FedoraLinux44 为不可用镜像发行版（勿选），用户 config 可显式 WslDistro=FedoraLinux
 3. v3.0 已全部交付（systemd 托管 + Runtime Bridge + 多实例 + 更新机制）✅
-   - 用户 web profile 已注入 dsh-runtime-bridge（node_modules 物理拷贝 +
-     cordis.patch.yml insert），并移除旧 dsh-webui-installer（interop 刷错元凶）
+   - Runtime Bridge 已重构为可安装 dsh 插件包 `dsh-web-manager`；用户 web profile 已通过
+     `dsh plugin --profile web add dsh-web-manager` 注入（自动进 `dsh.profile.bundles`），
+     并移除旧的手动拷贝注入与旧 dsh-webui-installer（interop 刷错元凶）
    - 用户 config 已切多实例：windows(3081) + wsl(3080, systemd)；WSL 3080 由
      systemd unit 托管（dsh 2091），bridge 3180 生效（getStatus 验证通过）
    - 红线：用户 Windows 3080 服务（28792）独立运行，未纳入 manager 实例、未触碰

@@ -77,27 +77,40 @@ powershell -ExecutionPolicy Bypass -File scripts\Install.ps1
 托盘「实例」菜单列出全部实例（打开窗口 / 重启服务 / 状态），并支持**添加实例**与**删除实例**
 （添加对话框可下拉选择 WSL 发行版，自动探测真实发行版，无需手填）。
 
-## Runtime Bridge（v3.0）
+## Runtime Bridge（v3.0 → 可安装的 dsh 插件包）
 
-dsh 内可注入运行时桥（`plugins/dsh-runtime-bridge`），管理器借此拿到 dsh 的**权威状态**
-（版本、node、运行时长、pid、端口）并做**优雅停止**（先 SIGTERM 再 kill），而不是只看端口猜测。
+本仓库本身就是一个可安装的 dsh 插件包 **`dsh-web-manager`**：它把运行时的桥插件
+（`lib/index.js` + `cordis.patch.yml`）和 Windows 托盘 exe、WSL 伴生脚本打包在一起。
+管理器借桥拿到 dsh 的**权威状态**（版本、node、运行时长、pid、端口）并做**优雅停止**
+（先 SIGTERM 再 kill），而不是只看端口猜测。
 
 协议（line-delimited JSON，监听 `127.0.0.1:<webPort+100>`）：
 `ping` / `getStatus` / `getRuntimeInfo` / `shutdown`，请求形如
 `{"v":1,"method":"getRuntimeInfo","token":"<BridgeToken>"}`。
 
-**注入步骤**（WSL 与 Windows 两侧 profile 各自执行一次）：
+**安装**（WSL 与 Windows 两侧 profile 各自执行一次）：
 
-1. 把 `plugins/dsh-runtime-bridge` 整个目录拷贝到 profile 的
-   `node_modules/dsh-runtime-bridge/`（WSL：`~/.dsh/profiles/<name>/`，
-   Windows：`C:\Users\<你>\.dsh\profiles\<name>\`）。
-2. 在该 profile 的 `cordis.patch.yml` 末尾追加：
+```bash
+# 从本地仓库安装
+dsh plugin --profile web add file:/path/to/dsh-web-manager
+# 或从 GitHub 安装
+dsh plugin --profile web add github:FYHC1/dsh-web-manager
+```
 
-   ```yaml
-   - insert:
-       - id: dsh-runtime-bridge
-         name: 'dsh-runtime-bridge'
-   ```
+该命令会：
+
+1. 用 pnpm 把 `dsh-web-manager` 装入 profile 的 `node_modules/`，并因
+   `package.json` 的 `dsh.bundle.patch` **自动追加到 `dsh.profile.bundles`**，
+   桥插件随之自动参与组合（不再需要手动拷贝目录 + 改 `cordis.patch.yml`）。
+2. 托盘 exe 为**显式一步**（避开 pnpm 对构建脚本的默认拦截）：Windows 侧在 profile
+   目录跑一次
+   `node node_modules\dsh-web-manager\scripts\install-tray.mjs`（等价于
+   `powershell -ExecutionPolicy Bypass -File <profile>\node_modules\dsh-web-manager\dist\Install.ps1`：
+   安装托盘 exe 到 `%LOCALAPPDATA%\dsh-web-manager\app`、初始化配置、拉起托盘）。
+
+**从旧的手动注入迁移**：若 profile 之前手动拷过 `node_modules/dsh-runtime-bridge`
+并在 `cordis.patch.yml` 里手动 `insert` 了 `dsh-runtime-bridge`，安装后请删除那段
+insert 与手拷目录，避免出现两套桥（双桥会抢同一个 `DSH_BRIDGE_PORT`）。
 
 管理器启动 dsh 时会自动注入 `DSH_BRIDGE_PORT`（=port+100）、`DSH_BRIDGE_TOKEN`
 （config 的 `BridgeToken`，首次自动生成）、`DSH_PROFILE`、`DSH_WEB_PORT`。

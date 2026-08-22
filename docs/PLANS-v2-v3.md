@@ -1,4 +1,4 @@
-﻿﻿# v2.1 / v3.0 实现计划（dsh web manager）
+﻿# v2.1 / v3.0 实现计划（dsh web manager）
 
 > 最终决策记录（截至 2026-08-21 会话）：
 > 语言 C#/.NET Framework 4.8 + WinForms；新仓库 FYHC1/dsh-web-manager 独立交付；
@@ -74,13 +74,15 @@
    - 托盘「实例」子菜单（每实例 打开窗口/重启/状态）；沙箱验证 Windows+WSL 同开
 
 3. **Runtime Bridge 插件（权威状态/优雅停止）** ✅ 已交付（2026-08-21）
-   - plugins/dsh-runtime-bridge（Cordis bundle 包：dsh.bundle.patch + cordis.patch.yml + lib/index.js）
+   - 已重构为可安装的 dsh 插件包 `dsh-web-manager`（Cordis bundle 包：
+     package.json `dsh.bundle.patch` + 根 `cordis.patch.yml` + `lib/index.js`），
+     附 Windows 托盘 exe + WSL 脚本；`dsh plugin --profile <name> add dsh-web-manager` 一键安装
    - versioned line-JSON 协议：ping / getStatus / getRuntimeInfo / shutdown（SIGTERM 优雅停止），
      token 校验；监听 WSL 内 127.0.0.1:<port+100>，manager 经 localhostForwarding 直连
    - wsl-start.sh / wsl-systemd-start.sh 传 DSH_BRIDGE_* env；manager 启动传 token +
      ping 验证 + Stop 先 bridge shutdown 再 kill 兜底
    - 端到端验证：真实 dsh 加载插件 → 全协议通过
-   - 待办：注入用户 web profile（node_modules + cordis.patch.yml insert，重启 dsh 生效）
+   - 已交付：注入用户 web profile（`dsh plugin --profile web add dsh-web-manager`，重启 dsh 生效）
 
 4. **更新机制** ✅ 已交付（2026-08-21）：UpdateChecker（npmmirror registry 最新版 +
    dsh --version 当前版，LastVersionCheckUtc 24h 节流）；托盘「更新」子菜单

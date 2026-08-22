@@ -1,0 +1,21 @@
+{
+  "name": "dsh-web-manager",
+  "version": "1.0.0",
+  "description": "dsh web manager — Windows tray manager, WSL companion scripts, and the in-dsh runtime bridge, installable as a dsh profile plugin bundle.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "dist",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ]
+}

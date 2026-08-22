@@ -1,0 +1,8 @@
+# dsh-web-manager: runtime bridge — authoritative status + graceful shutdown
+# over loopback TCP. This file is the package's bundle patch layer (declared by
+# package.json dsh.bundle.patch). `dsh plugin --profile <name> add dsh-web-manager`
+# appends this package to dsh.profile.bundles, so the bridge row below is composed
+# automatically — no manual cordis.patch.yml edit is needed.
+- insert:
+    - id: dsh-runtime-bridge
+      name: 'dsh-web-manager'
