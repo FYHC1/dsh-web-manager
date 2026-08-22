@@ -76,7 +76,8 @@ namespace DshWebManager
             _btnWindows.Width = 96;
             _btnWindows.Height = 30;
             _btnWindows.Cursor = Cursors.Hand;
-            _btnWindows.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); };
+            _btnWindows.TabStop = false;
+            _btnWindows.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); RefocusMenu(); };
 
             _btnWsl = new Button();
             _btnWsl.Text = MenuBackendWsl;
@@ -85,7 +86,8 @@ namespace DshWebManager
             _btnWsl.Width = 96;
             _btnWsl.Height = 30;
             _btnWsl.Cursor = Cursors.Hand;
-            _btnWsl.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); };
+            _btnWsl.TabStop = false;
+            _btnWsl.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); RefocusMenu(); };
 
             FlowLayoutPanel switcher = new FlowLayoutPanel();
             switcher.FlowDirection = FlowDirection.LeftToRight;
@@ -444,6 +446,20 @@ namespace DshWebManager
                         }
                     }
                 }
+            }
+            catch { }
+        }
+
+        /// <summary>After clicking a switcher button, focus sits inside the
+        /// ToolStripControlHost's child HWND; while it stays there the parent
+        /// ContextMenuStrip no longer tracks mouse hover on its items, so the
+        /// hover highlight appears late (or not at all). Hand focus straight back
+        /// to the popup so hover paint stays instant.</summary>
+        private void RefocusMenu()
+        {
+            try
+            {
+                if (_menu != null && _menu.Visible) _menu.Focus();
             }
             catch { }
         }
