@@ -246,3 +246,11 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | CCCC | 预热方案 | 关窗后 `--no-startup-window` 驻留 Edge | ❌ 结果不稳定（0.75s~1.9s），转发窗口 FindAppWindow 匹配困难 → **放弃** |
 | DDDD | URL 门控（根因） | WSL localhost 转发抖动时打开 | ❌ `WindowUrl` 返回空 → **5 秒重试**（日志 `URL not ready, scheduling retries`）→ "大部分时候慢" → **移除门控**：窗口立即打开，页面等转发恢复后自动加载；10s 后台可达性检查替代诊断气泡 |
 | EEEE | 移除门控后 | 打开/关窗重开 | ✅ 每次 ~1.0s（Edge 冷启动固有），尺寸 1665×1020 稳定，可达性检查不误报；FindAppWindow 放宽为按专属 profile 目录匹配（不再要求 --app=） |
+
+## 弹出速度：预热方案（重开慢根因实测）— 2026-08-22
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| FFFF | 重开慢（根因定位） | 细粒度测量 | ✅ 第一次：hwnd +432ms/内容 +453ms；重开：hwnd +1041ms/内容 +1318ms——**Edge 重载 profile 状态（扩展/会话）使窗口创建慢 ~600ms**；窗口创建即可见（无隐藏），内容延迟为 dsh web UI JS 渲染（~350ms，本地 1.5MB 资源传输 <2ms，非网络） |
+| GGGG | 预热方案 | 关窗后 `--no-startup-window` 驻留 + 放宽 FindAppWindow 匹配转发窗口 | ✅ 重开 hwnd 降至 713~1108ms（平均优于冷启动 1041ms，存在波动）；关窗→预热→重开循环稳定；尺寸正确 1563×1020 |
+| HHHH | 中断部署恢复 | 部署中断致旧 exe 残留 + 端口接管 | ✅ 清理残留进程、确认 systemd 服务接管 3080（会话从磁盘恢复无损）、重启新 exe 管理器，双后端附着正常 |

@@ -805,6 +805,10 @@ namespace DshWebManager
                     var b = Balloon; if (b != null) b("dsh web manager", "窗口已关闭，服务已停止");
                 }
                 // Default: service keeps running; tray can re-open the window anytime.
+                // Keep the browser warm: a preheated window-less Edge makes the next
+                // open ~600ms faster (the profile state reload on cold start is the
+                // measured reopen slowdown).
+                EdgeWindow.Preheat(port, _config.DataDir);
             }
             _hadWindows[c] = hasWindow;
         }

@@ -83,6 +83,38 @@ namespace DshWebManager
             return Process.Start(psi);
         }
 
+        /// <summary>Starts an idle, window-less Edge process for the profile so the
+        /// NEXT open forwards to a warm browser instead of a slower reload of the
+        /// profile state (extensions/session - measured ~600ms extra on reopen).
+        /// No-op when a process for the profile already exists. Called when an app
+        /// window closes, giving the warm process time to settle before the user
+        /// reopens. The relaxed FindAppWindow matches the forwarded window.</summary>
+        public static void Preheat(int port, string dataDir)
+        {
+            try
+            {
+                if (String.IsNullOrEmpty(dataDir))
+                    dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-web-manager-browser");
+                dataDir = dataDir + "-" + port;
+                string needle = "-" + port + "\"";
+                _procCache = null;
+                foreach (EdgeProcInfo info in GetEdgeProcesses())
+                {
+                    if (info.CommandLine.IndexOf("--type=", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (info.CommandLine.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
+                        return; // already warm (visible window or preheated)
+                }
+                string edge = FindEdgeExe();
+                if (edge == null) return;
+                ProcessStartInfo psi = new ProcessStartInfo(edge,
+                    "--user-data-dir=\"" + dataDir + "\" --no-startup-window");
+                psi.UseShellExecute = false;
+                Process.Start(psi);
+                FileLog.Info("Preheat: started warm Edge for " + dataDir);
+            }
+            catch (Exception ex) { FileLog.Error("Preheat: " + ex.Message); }
+        }
+
         /// <summary>Per-port launch timestamps; CaptureSize is held off for a few
         /// seconds after a launch so a window that opened at the wrong size is
         /// never captured (that used to clobber the remembered geometry before
