@@ -207,3 +207,12 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | QQQ | 参数正确但窗口仍错（根因） | 实例级修复后启动参数带 1665x1020 | ❌ 实际窗口仍 945x1020：**Edge 用 Preferences 保存的 `browser.window_placement` 覆盖 `--window-size`**（全新进程也一样，非转发问题）；且 2s 心跳 `CaptureSize` 先把记忆值覆盖成错误实际值（945），3.5s 后的校正拿到被覆盖值 → 空转 |
 | RRR | 快照 + 保持期 + 轮询校正 | 修复后开 WSL 窗口 | ✅ 启动快照记忆值；CaptureSize 保持 6s 不覆盖；轮询到窗口即 `EnforceGeometry`（`SetWindowPos`）：实测 `applied 1665x1020 @130,7 (actual was 945x1020 @130,7)`，窗口 1665x1020；关窗重开再次校正成功；配置保持 1665 不被覆盖 |
 | SSS | Chromium 持久化验证 | 校正后关窗再开 | ✅ 每次打开仍需校正（Chromium 只持久化用户主动调整，外部 SetWindowPos 不写入其 Preferences）→ 校正作为确定性兜底每次启动执行 |
+
+## 窗口尺寸记忆根治测试矩阵 — 2026-08-22 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| TTT | Edge 对尺寸参数的真实行为 | fresh profile + `--window-size=1500x800 --window-position=100,100` | ❌ 位置 100,100 生效，**尺寸仍 945×1020**（Edge 150 完全忽略 size 参数，app 窗口恒用默认尺寸） |
+| UUU | Preferences 写入方案 | 启动前改写 `browser.window_placement` + `app_window_placement` | ❌ 窗口仍开 945；Edge 启动时未采用（该键不是 --app 窗口的尺寸来源） |
+| VVV | SetWindowPlacement 直接调用 | 对 Chromium 窗口调用 | ❌ 全新结构体调用返回 error 87；**先 GetWindowPlacement 预填再 Set** 返回 true 但**尺寸改动被 Chromium 忽略**（只取消了最小化）；真正生效的是 SetWindowPos |
+| WWW | 根治方案 | `--start-minimized` 启动 + 出现后「GetWindowPlacement 预填 → SW_HIDE → SetWindowPos 记忆尺寸 → SW_SHOW」 | ✅ 窗口全程不显示错误尺寸，直接以记忆的 1665×1020 出现；关窗重开循环稳定；配置不再被覆盖 |

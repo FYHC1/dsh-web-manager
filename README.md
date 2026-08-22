@@ -257,14 +257,15 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
   而 `CaptureSize` 写入实例级 `Window`，多实例下尺寸永不生效 → 改用实例级窗口配置）；
   ③状态栏严格跟随顶部 Windows/WSL 切换按钮（切换即刷新，只显示所选端，无匹配显示
   「未选择后端」）；④插件包更新提示具体更新的包与来源 ✅ 已交付
-- **v3.1 窗口尺寸记忆深度修复**：实例级配置修复后仍不生效的**真正根因**——Edge 用自己
-  Preferences 里保存的窗口边界（`browser.window_placement`）**覆盖 `--window-size`
-  启动参数**（全新进程也一样），且 Chromium 只持久化用户主动调整、不记录外部
-  `SetWindowPos`。修复：①启动时**快照**记忆几何；②启动后 **CaptureSize 保持 6 秒**
-  不覆盖（否则 2s 心跳先把你记忆的尺寸覆盖成错误实际值，校正就空转了）；
-  ③启动后**轮询**窗口出现即 `SetWindowPos` 强制校正（实测每次打开都能把 945 修正为
-  记忆的 1665×1020，关窗重开依旧）；④启动前清除该 profile 的残留后台进程（Startup
-  Boost 转发会丢参数）✅ 已交付
+- **v3.1 窗口尺寸记忆深度修复**：实例级配置修复后仍不生效的**真正根因**——Edge 150
+  完全忽略 `--window-size`（fresh profile 实证：`--window-size=1500x800` 仍开 945×1020
+  默认尺寸），始终按自己保存的边界打开 `--app` 窗口；且 Chromium 窗口会拒绝未预填的
+  `SetWindowPlacement`（error 87）、对 `SetWindowPlacement` 的尺寸改动静默忽略。最终
+  根治方案：**启动带 `--start-minimized`**（窗口以最小化出现，错误尺寸不可见）→ 窗口
+  出现后**先 `GetWindowPlacement` 预填 → `SW_HIDE` 取消最小化 → `SetWindowPos` 应用
+  记忆尺寸 → `SW_SHOW` 显示**（全程不显示错误尺寸，无跳动）。另保留：启动时快照记忆
+  几何、CaptureSize 启动后 6 秒保持期（阻断覆盖循环）、启动前清除残留后台进程。
+  实测：打开/关窗重开均直接以记忆的 1665×1020 出现，配置稳定 ✅ 已交付
 
 ## 许可
 

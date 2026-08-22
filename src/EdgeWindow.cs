@@ -53,6 +53,14 @@ namespace DshWebManager
                 dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-web-manager-browser");
             dataDir = dataDir + "-" + port;
             string args = "--app=" + url + " --user-data-dir=\"" + dataDir + "\"";
+            // Edge 150 IGNORES --window-size (verified: fresh profile with
+            // --window-size=1500x800 still opens 945x1020) and always opens --app
+            // windows at its own saved/default placement. Root-cause fix: start
+            // MINIMIZED, then restore with SetWindowPlacement at the remembered
+            // geometry the moment the window materializes - the user never sees a
+            // wrong-size window (no snap). Position flags still apply; size flags
+            // are kept for other engines.
+            args += " --start-minimized";
             if (window != null)
             {
                 if (!String.IsNullOrEmpty(window.Size))
@@ -65,9 +73,9 @@ namespace DshWebManager
             // Edge startup boost keeps headless processes alive per profile; a
             // second launch with the same --user-data-dir gets forwarded to them
             // and the size/position flags are dropped. Kill lingering background
-            // processes for this profile so the new process is fresh and honors
-            // --window-size/--window-position. Only reached when no visible
-            // window exists for the port, so nothing user-visible is interrupted.
+            // processes for this profile so the new process is fresh. Only reached
+            // when no visible window exists for the port, so nothing user-visible
+            // is interrupted.
             KillLingeringEdge(dataDir);
             lock (_launchAt) { _launchAt[port] = DateTime.Now; } // hold CaptureSize off for a while
             ProcessStartInfo psi = new ProcessStartInfo(edge, args);
@@ -234,11 +242,10 @@ namespace DshWebManager
         }
 
         /// <summary>Background pass right after a launch: poll for the window to
-        /// appear, then enforce the remembered geometry as soon as it does (Edge
-        /// opens at its own saved placement and ignores the size flags; Chromium
-        /// only persists user-initiated resizes, so this runs on every launch).
-        /// The snapshot keeps working even if CaptureSize later overwrites the
-        /// shared WindowConfig with the wrong actual size.</summary>
+        /// appear, then restore it at the remembered geometry (the window was
+        /// started minimized so the wrong-size state is never visible). The
+        /// snapshot keeps working even if CaptureSize later overwrites the shared
+        /// WindowConfig with the wrong actual size.</summary>
         private static void ScheduleGeometryEnforce(int port, WindowConfig snapshot)
         {
             System.Threading.ThreadPool.QueueUserWorkItem(_ =>
@@ -250,36 +257,63 @@ namespace DshWebManager
                         System.Threading.Thread.Sleep(500);
                         IntPtr h = FindAppWindow(port);
                         if (h == IntPtr.Zero) continue;
-                        EnforceGeometry(h, snapshot);
+                        RestoreGeometry(h, snapshot);
                         break;
                     }
                 }
-                catch (Exception ex) { FileLog.Error("EnforceGeometry pass: " + ex.Message); }
+                catch (Exception ex) { FileLog.Error("RestoreGeometry pass: " + ex.Message); }
             });
         }
 
-        /// <summary>Applies the remembered size/position when the actual geometry
-        /// differs beyond a small tolerance. Skips minimized/maximized windows.</summary>
-        public static void EnforceGeometry(IntPtr h, WindowConfig window)
+        /// <summary>Restores a window launched minimized: one SetWindowPlacement
+        /// call sets the remembered size/position AND un-minimizes it, so the
+        /// window appears at the right geometry with no visible resize. When no
+        /// geometry is remembered, the window is simply restored (never left
+        /// minimized).</summary>
+        public static void RestoreGeometry(IntPtr h, WindowConfig window)
         {
-            if (h == IntPtr.Zero || window == null) return;
-            if (Win32.IsIconic(h) || Win32.IsZoomed(h)) return;
-            int memW, memH;
-            if (!TryParseSize(window.Size, out memW, out memH)) return;
-            int memX, memY;
-            bool hasPos = TryParsePosition(window.Position, out memX, out memY);
-            Win32.RECT r;
-            if (!Win32.GetWindowRect(h, out r)) return;
-            bool needSize = Math.Abs(r.Width - memW) > 25 || Math.Abs(r.Height - memH) > 25;
-            bool needPos = hasPos && (Math.Abs(r.Left - memX) > 25 || Math.Abs(r.Top - memY) > 25);
-            if (!needSize && !needPos) return;
-            int w = needSize ? memW : r.Width;
-            int ht = needSize ? memH : r.Height;
-            int x = needPos ? memX : r.Left;
-            int y = needPos ? memY : r.Top;
-            Win32.SetWindowPos(h, IntPtr.Zero, x, y, w, ht, Win32.SWP_NOACTIVATE | Win32.SWP_NOZORDER);
-            FileLog.Info("EnforceGeometry: applied " + w + "x" + ht + " @" + x + "," + y
-                + " (actual was " + r.Width + "x" + r.Height + " @" + r.Left + "," + r.Top + ")");
+            if (h == IntPtr.Zero) return;
+            int memW = 0, memH = 0, memX = 0, memY = 0;
+            bool hasSize = window != null && TryParseSize(window.Size, out memW, out memH);
+            bool hasPos = window != null && TryParsePosition(window.Position, out memX, out memY);
+            if (!hasSize && !hasPos)
+            {
+                FileLog.Info("RestoreGeometry: no remembered geometry, plain restore");
+                Win32.ShowWindow(h, Win32.SW_RESTORE);
+                return;
+            }
+            // Deterministic sequence that never shows the wrong size:
+            // 1) un-minimize WITHOUT showing (SetWindowPlacement SW_HIDE; priming
+            //    via GetWindowPlacement first, Chromium rejects zeroed structs),
+            // 2) SetWindowPos the remembered geometry (proven to work; on a
+            //    hidden window it applies the normal rect, not the icon position),
+            // 3) show it - it appears at the remembered size directly.
+            Win32.WINDOWPLACEMENT wp = new Win32.WINDOWPLACEMENT();
+            wp.length = System.Runtime.InteropServices.Marshal.SizeOf(typeof(Win32.WINDOWPLACEMENT));
+            if (!Win32.GetWindowPlacement(h, ref wp))
+            {
+                FileLog.Error("RestoreGeometry: GetWindowPlacement failed (lastErr="
+                    + System.Runtime.InteropServices.Marshal.GetLastWin32Error() + "), plain restore");
+                Win32.ShowWindow(h, Win32.SW_RESTORE);
+                return;
+            }
+            wp.showCmd = Win32.SW_HIDE; // un-minimize without showing
+            if (!Win32.SetWindowPlacement(h, ref wp))
+            {
+                // Chromium may reject SW_HIDE too; just force-show at the end.
+                FileLog.Error("RestoreGeometry: hide failed (lastErr="
+                    + System.Runtime.InteropServices.Marshal.GetLastWin32Error() + ")");
+            }
+            int x = hasPos ? memX : wp.normalPosition.Left;
+            int y = hasPos ? memY : wp.normalPosition.Top;
+            int w = hasSize ? memW : (wp.normalPosition.Right - wp.normalPosition.Left);
+            int ht = hasSize ? memH : (wp.normalPosition.Bottom - wp.normalPosition.Top);
+            if (w > 100 && ht > 100)
+            {
+                Win32.SetWindowPos(h, IntPtr.Zero, x, y, w, ht, Win32.SWP_NOACTIVATE | Win32.SWP_NOZORDER);
+            }
+            Win32.ShowWindow(h, Win32.SW_SHOW);
+            FileLog.Info("RestoreGeometry: restored " + w + "x" + ht + " @" + x + "," + y);
         }
 
         private static bool TryParseSize(string size, out int w, out int h)
