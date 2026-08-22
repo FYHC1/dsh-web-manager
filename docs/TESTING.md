@@ -1,4 +1,4 @@
-﻿﻿# 验证矩阵（v2.0 + v2.1 真机实测记录）
+﻿# 验证矩阵（v2.0 + v2.1 真机实测记录）
 
 测试机：Windows 11 22H2 + WSL2（FedoraLinux 运行中 / FedoraLinux44 默认但 Stopped）
 dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm/.../dsh`
@@ -169,3 +169,4 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | BBB | 勾选指示修复 | 打开「默认启动后端」子菜单 | ✅ `ShowCheckMargin=true`（仅含勾选项的子菜单）→ 当前默认项显示原生 16×16 勾选（探针实证 `OnRenderItemCheck` 调用 + 像素级确认）；无勾选项的子菜单（实例/更新）不开启，保持紧凑 |
 | CCC | WSL 服务模式勾选 | 打开「WSL 服务模式」子菜单 | ✅ 当前模式（wrapper/systemd）同样显示勾选，与默认后端一致 |
 | DDD | 布局回归检查 | 打开主菜单 + 两个带勾选子菜单 | ✅ 主菜单 256×423、状态项 46px 两行、实例/更新子菜单宽度不变（无空勾选列）；新 exe 反射验证：default/mode 子菜单 `ShowCheckMargin=True`、instances=False |
+| EEE | 开机自启灰色标识 | 「开机自启」开 → 关 → 开 | ✅ 开启时该项背景灰色阴影（`#E6E6E6`），关闭恢复白底；主菜单无勾选列、宽度不变；悬停该项仍淡蓝高亮；以 config 为准同步（写注册表失败自动回退） |

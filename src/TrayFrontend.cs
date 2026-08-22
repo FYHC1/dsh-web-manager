@@ -28,6 +28,8 @@ namespace DshWebManager
         private bool _closing;
         private const int MenuMinimumWidth = 220;
         private const int StatusItemHeight = 46;   // fixed two-line status height
+        // 开机自启"开"状态用灰色阴影背景标识（主菜单不开勾选列，避免加宽所有项）。
+        private static readonly Color AutoStartOnColor = Color.FromArgb(0xE6, 0xE6, 0xE6);
 
         private static string MenuOpen = "\u6253\u5f00\u7a97\u53e3";            // 打开窗口
         private static string MenuRestart = "\u91cd\u542f\u670d\u52a1";        // 重启服务
@@ -65,7 +67,7 @@ namespace DshWebManager
             _autoStartItem = new ToolStripMenuItem(MenuAutoStart);
             _autoStartItem.CheckOnClick = true;
             _autoStartItem.Checked = service.Config.AutoStart;
-            _autoStartItem.Click += delegate { _service.ToggleAutoStart(); };
+            _autoStartItem.Click += delegate { _service.ToggleAutoStart(); RefreshBackendCheck(); };
 
             _btnWindows = new Button();
             _btnWindows.Text = MenuBackendWindows;
@@ -174,6 +176,10 @@ namespace DshWebManager
             {
                 Rectangle r = new Rectangle(Point.Empty, e.Item.Size);
                 Color c = e.Item.Selected ? Hover : e.ToolStrip.BackColor;
+                // 主菜单不开勾选列：像"开机自启"这类用背景色标识"开"状态的项，非悬停时按其
+                // 显式设置的 BackColor（灰色阴影）绘制；悬停仍显示淡蓝高亮。
+                if (!e.Item.Selected && !e.Item.BackColor.IsEmpty)
+                    c = e.Item.BackColor;
                 using (SolidBrush b = new SolidBrush(c)) e.Graphics.FillRectangle(b, r);
                 if (e.Item.Selected)
                     using (Pen p = new Pen(Border)) e.Graphics.DrawRectangle(p, 0, 0, r.Width - 1, r.Height - 1);
@@ -479,6 +485,15 @@ namespace DshWebManager
                     && String.Equals(_service.Config.WslServiceMode, "systemd", StringComparison.OrdinalIgnoreCase);
                 if (_modeSystemdItem != null && _modeSystemdItem.Checked != systemd) _modeSystemdItem.Checked = systemd;
                 if (_modeWrapperItem != null && _modeWrapperItem.Checked != !systemd) _modeWrapperItem.Checked = !systemd;
+                // 开机自启：主菜单不开勾选列（会加宽所有项），改用灰色阴影背景标识"开"。
+                // 以 config 为准同步 Checked 与 BackColor，ToggleAutoStart 失败时也能自愈。
+                bool autoStart = _service.Config.AutoStart;
+                if (_autoStartItem != null)
+                {
+                    if (_autoStartItem.Checked != autoStart) _autoStartItem.Checked = autoStart;
+                    Color autoBg = autoStart ? AutoStartOnColor : Color.Empty;
+                    if (_autoStartItem.BackColor != autoBg) _autoStartItem.BackColor = autoBg;
+                }
             }
             catch { }
         }

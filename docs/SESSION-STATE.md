@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
+﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
 
 > 本文件用途：会话压缩/恢复时读取，重建关键事实与未完成事项。
 > 最后更新：2026-08-22 默认启动后端勾选指示修复后
@@ -30,6 +30,11 @@
   主菜单 256×423 布局与状态项两行高度不变。已用 WinForms 探针在 .NET 4.8 上实证
   （`ShowCheckMargin=false` 时 `OnRenderItemCheck` 不被调用；`true` 时以 16×16 勾选位图绘制），
   并对新编译 exe 反射验证：default/mode 子菜单 `ShowCheckMargin=True`、实例子菜单 False。
+- **开机自启灰色标识（本次后续）**：用户要求「开机自启」**不用勾选列**（主菜单开勾选列会加宽
+  所有项），改为开启时**灰色阴影背景**（`#E6E6E6`），关闭恢复白底。实现：`TrayRenderer.
+  OnRenderMenuItemBackground` 非悬停时尊重 `e.Item.BackColor`（显式非空则用其色）；
+  `RefreshBackendCheck` 以 `Config.AutoStart` 同步 `_autoStartItem.Checked` + `BackColor`
+  （`ToggleAutoStart` 写注册表失败可自愈），点击后立即 `RefreshBackendCheck` 即时刷新。
 
 ## 用户原始诉求（任务栏图标，已闭环）
 
