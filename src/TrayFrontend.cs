@@ -43,8 +43,10 @@ namespace DshWebManager
         private static string MenuWslModeWrapper = "wrapper (\u81ea\u6108\u811a\u672c)";  // wrapper (自愈脚本)
         private static string MenuWslModeSystemd = "systemd (unit)";
         private static string MenuInstances = "\u5b9e\u4f8b";                    // 实例
-        private static string MenuCheckUpdate = "\u68c0\u67e5\u66f4\u65b0";    // 检查更新
+        private static string MenuCheckUpdate = "\u68c0\u67e5 dsh \u66f4\u65b0";  // 检查 dsh 更新
         private static string MenuUpdateDsh = "\u66f4\u65b0 dsh";                // 更新 dsh
+        private static string MenuCheckManagerUpdate = "\u68c0\u67e5\u7ba1\u7406\u5668\u66f4\u65b0"; // 检查管理器更新
+        private static string MenuUpdateManager = "\u66f4\u65b0 dsh web manager"; // 更新 dsh web manager
         private static string MenuAddInstance = "\u6dfb\u52a0\u5b9e\u4f8b";       // 添加实例
         private static string MenuRemoveInstance = "\u5220\u9664\u5b9e\u4f8b";    // 删除实例
         private static string MenuCloseInstance = "\u5173\u95ed\u5b9e\u4f8b";        // 关闭实例
@@ -142,9 +144,14 @@ namespace DshWebManager
             _menu.Items.Add(_instancesMenu);
             ToolStripMenuItem checkItem = new ToolStripMenuItem(MenuCheckUpdate, null, delegate { _service.CheckForUpdates(); });
             ToolStripMenuItem updateItem = new ToolStripMenuItem(MenuUpdateDsh, null, delegate { _service.ApplyDshUpdate(); });
+            ToolStripMenuItem mgrCheckItem = new ToolStripMenuItem(MenuCheckManagerUpdate, null, delegate { _service.CheckForManagerUpdate(); });
+            ToolStripMenuItem mgrUpdateItem = new ToolStripMenuItem(MenuUpdateManager, null, delegate { _service.ApplyManagerUpdate(); });
             ToolStripMenuItem updatesMenu = new ToolStripMenuItem("\u66f4\u65b0"); // 更新
             updatesMenu.DropDownItems.Add(checkItem);
             updatesMenu.DropDownItems.Add(updateItem);
+            updatesMenu.DropDownItems.Add(new ToolStripSeparator());
+            updatesMenu.DropDownItems.Add(mgrCheckItem);
+            updatesMenu.DropDownItems.Add(mgrUpdateItem);
             _menu.Items.Add(updatesMenu);
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(_statusItem);

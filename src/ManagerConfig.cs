@@ -49,6 +49,9 @@ namespace DshWebManager
         public string BridgeToken { get; set; }   // dsh runtime bridge shared secret (v3.0)
         public string LastVersionCheckUtc { get; set; } // update check throttle (v3.0)
         public string LastKnownLatest { get; set; }     // last known latest dsh version (v3.0)
+        public string LastManagerCheckUtc { get; set; } // manager self-update check throttle (v3.1)
+        public string LastKnownManagerLatest { get; set; } // last known latest manager version (v3.1)
+        public string ManagerUpdateApi { get; set; }    // release API override ("" = GitHub official; v3.1)
         public string Profile { get; set; }        // dsh profile name (default web)
         public string Version { get; set; }
 
@@ -119,8 +122,11 @@ namespace DshWebManager
             BridgeToken = String.Empty;
             LastVersionCheckUtc = String.Empty;
             LastKnownLatest = String.Empty;
+            LastManagerCheckUtc = String.Empty;
+            LastKnownManagerLatest = String.Empty;
+            ManagerUpdateApi = String.Empty;
             Profile = "web";
-            Version = "2.1.0";
+            Version = "3.0.0";
             Instances = null; // null = legacy single-instance mode
         }
 
@@ -147,8 +153,11 @@ namespace DshWebManager
                         if (loaded.BridgeToken == null) loaded.BridgeToken = String.Empty;
                         if (loaded.LastVersionCheckUtc == null) loaded.LastVersionCheckUtc = String.Empty;
                         if (loaded.LastKnownLatest == null) loaded.LastKnownLatest = String.Empty;
+                        if (loaded.LastManagerCheckUtc == null) loaded.LastManagerCheckUtc = String.Empty;
+                        if (loaded.LastKnownManagerLatest == null) loaded.LastKnownManagerLatest = String.Empty;
+                        if (loaded.ManagerUpdateApi == null) loaded.ManagerUpdateApi = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
-                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "2.1.0";
+                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.0.0";
                         return loaded;
                     }
                 }

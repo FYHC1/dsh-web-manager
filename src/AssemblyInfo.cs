@@ -6,5 +6,5 @@ using System.Reflection;
 [assembly: AssemblyProduct("dsh web manager")]
 [assembly: AssemblyCompany("dsh-web-manager")]
 [assembly: AssemblyCopyright("MIT License")]
-[assembly: AssemblyVersion("2.1.0.0")]
-[assembly: AssemblyFileVersion("2.1.0.0")]
+[assembly: AssemblyVersion("3.0.0.0")]
+[assembly: AssemblyFileVersion("3.0.0.0")]

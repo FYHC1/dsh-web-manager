@@ -119,6 +119,10 @@ namespace DshWebManager
                     _service.Exit(false);
                 else if (action.Equals("restart", StringComparison.OrdinalIgnoreCase))
                     _service.Restart();
+                else if (action.Equals("updatemanager", StringComparison.OrdinalIgnoreCase))
+                    _service.ApplyManagerUpdate();
+                else if (action.Equals("checkmanagerupdate", StringComparison.OrdinalIgnoreCase))
+                    _service.CheckForManagerUpdate();
                 else if (action.StartsWith("backend ", StringComparison.OrdinalIgnoreCase))
                     _service.SetBackend(action.Substring("backend ".Length).Trim());
                 else if (action.StartsWith("wslmode ", StringComparison.OrdinalIgnoreCase))

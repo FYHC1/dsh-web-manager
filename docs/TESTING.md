@@ -170,3 +170,15 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | CCC | WSL 服务模式勾选 | 打开「WSL 服务模式」子菜单 | ✅ 当前模式（wrapper/systemd）同样显示勾选，与默认后端一致 |
 | DDD | 布局回归检查 | 打开主菜单 + 两个带勾选子菜单 | ✅ 主菜单 256×423、状态项 46px 两行、实例/更新子菜单宽度不变（无空勾选列）；新 exe 反射验证：default/mode 子菜单 `ShowCheckMargin=True`、instances=False |
 | EEE | 开机自启灰色标识 | 「开机自启」开 → 关 → 开 | ✅ 开启时该项背景灰色阴影（`#E6E6E6`），关闭恢复白底；主菜单无勾选列、宽度不变；悬停该项仍淡蓝高亮；以 config 为准同步（写注册表失败自动回退） |
+
+## 管理器自更新测试矩阵 — 2026-08-22 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| FFF | GitHub 无 Release | `checkmanagerupdate`（官方 API） | ✅ TLS 1.2 显式启用后连通；404 → 气泡「GitHub 上还没有发布版本」 |
+| GGG | 本地测试源（fake release v3.0.2 + exe 资产） | `ManagerUpdateApi=http://127.0.0.1:8199/release.json` + `updatemanager` | ✅ 下载 → 校验文件版本 3.0.2.0 → 生成脱离脚本 → 退出（dsh 未停）→ 脚本等锁 → 替换 exe → 托盘自动重启 → 双后端重新附着；`manager-update.log` 记录 started/replaced/restarted |
+| HHH | JavaScriptSerializer 数组类型（根因） | 解析 GitHub assets 数组 | ❌ `Deserialize<Dictionary<string,object>>` 把 JSON 数组反序列化为 **ArrayList** 而非 `object[]` → `DownloadUrl` 恒空、静默失败 → 修复：兼容两种形状（`ArrayList.ToArray()`）后通过 |
+| III | 版本校验拒绝 | 下载版本 ≤ 当前 | ✅ 取消更新并气泡「下载的文件版本异常」 |
+
+> 真实发布走 `gh release create vX.Y.Z dist/dsh-web-manager.exe`；自更新仅接受非 prerelease 的
+> release，且要求资产名为 `dsh-web-manager.exe`。

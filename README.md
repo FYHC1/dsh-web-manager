@@ -135,13 +135,32 @@ insert 与手拷目录，避免出现两套桥（双桥会抢同一个 `DSH_BRID
 或 `open wsl`）：打开指定后端的窗口，与快捷方式一致。双击快捷方式时若托盘未运行会
 先冷启动托盘（并附着/启动各实例），再打开对应后端窗口；若托盘已在运行则直接转发。
 
-## 更新机制（v3.0）
+## 更新机制（v3.1）
 
-托盘「更新」菜单：
+托盘「更新」菜单同时管理 **dsh** 与 **dsh web manager** 两个软件，互不影响：
 
-- **检查更新**：24 小时节流，经 npmmirror 查询 `@deepseek-ai/dsh` 最新版，与运行中 dsh 版本
+- **检查 dsh 更新**：24 小时节流，经 npmmirror 查询 `@deepseek-ai/dsh` 最新版，与运行中 dsh 版本
   （优先取 Runtime Bridge 的 `dshVersion`）比对，有新版才弹通知。
 - **更新 dsh**：一键 `npm install -g @deepseek-ai/dsh@latest`（走 npmmirror），完成后提示新版本号。
+- **检查管理器更新**：查询 GitHub Releases（`FYHC1/dsh-web-manager/releases/latest`），与当前
+  管理器版本比对，弹通知告知结果（无发布 / 已最新 / 发现新版）。
+- **更新 dsh web manager**（自更新）：下载最新 release 中的 `dsh-web-manager.exe` →
+  校验文件版本 → 生成脱离式更新脚本 → 退出托盘（**不停止任何 dsh 服务**）→ 脚本等 exe
+  解锁后替换并自动以托盘模式重启 → 管理器重新附着各实例。全程 dsh 保持运行。
+  - 更新包下载到 `%LOCALAPPDATA%\dsh-web-manager\update\`，更新过程记录在
+    `%LOCALAPPDATA%\dsh-web-manager\logs\manager-update.log`。
+  - 启动时也会做一次 24h 节流的管理器版本检查，发现新版才弹通知。
+
+### 发布新版本（给维护者）
+
+自更新依赖 GitHub Release 附带 `dsh-web-manager.exe` 资产（tag 形如 `v3.0.1`，跳过 prerelease）：
+
+```bash
+# 在仓库根目录（WSL 或 Windows 均可，需要 gh 已登录）
+gh release create v3.0.1 dist/dsh-web-manager.exe --title "dsh web manager v3.0.1" --notes "更新说明"
+```
+
+发布后，用户点托盘「更新 dsh web manager」即可自动升级。
 
 ## 状态与配置
 
@@ -164,7 +183,9 @@ insert 与手拷目录，避免出现两套桥（双桥会抢同一个 `DSH_BRID
 | `Instances` | v3.0 多实例列表（Id/Profile/BackendType/Port/WslPort/WslDistro/WslServiceMode/Enabled）；空 = 单实例回退 | `null` |
 | `BridgeToken` | Runtime Bridge 共享密钥（首次自动生成） | `""` |
 | `LastWslDistro` | 记忆上次成功使用的 WSL 发行版 | `""` |
-| `LastVersionCheckUtc` / `LastKnownLatest` | 更新检查节流时间戳 / 已知最新版本 | `""` |
+| `LastVersionCheckUtc` / `LastKnownLatest` | dsh 更新检查节流时间戳 / 已知最新版本 | `""` |
+| `LastManagerCheckUtc` / `LastKnownManagerLatest` | 管理器更新检查节流时间戳 / 已知最新版本 | `""` |
+| `ManagerUpdateApi` | 管理器 Release API 覆盖地址（留空用官方 GitHub；测试/镜像用） | `""` |
 
 ## 开发
 
@@ -204,6 +225,11 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 - **开机自启灰色标识**：主菜单不开勾选列（会加宽所有项）——「开机自启」开启时该项背景
   改为灰色阴影（`#E6E6E6`），关闭时恢复白底；以 config 为准同步，`ToggleAutoStart` 失败
   也能自愈；悬停仍显示淡蓝高亮 ✅ 已交付
+- **悬停高亮卡顿修复**：点击顶部 Windows/WSL 切换按钮后，焦点被托管按钮夺走导致菜单
+  不再跟踪悬停 → 切换后把焦点还给菜单（`RefocusMenu`），高亮恢复即时 ✅ 已修复
+- **v3.1 管理器自更新**：GitHub Releases 查询/比对（跳过 prerelease）+ 下载校验 +
+  脱离式更新脚本（等 exe 解锁 → 替换 → 托盘重启，不停止 dsh）+ 托盘「检查管理器更新 /
+  更新 dsh web manager」+ 启动时 24h 节流检查 + `updatemanager` 控制动作 ✅ 已交付
 
 ## 许可
 

@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Threading;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using System.Windows.Forms;
 
 namespace DshWebManager
@@ -341,6 +343,8 @@ namespace DshWebManager
         {
             ThreadPool.QueueUserWorkItem(_ =>
             {
+                try { CheckManagerUpdateThrottled(); }
+                catch (Exception ex) { FileLog.Error("CheckManagerUpdateThrottled: " + ex.Message); }
                 try
                 {
                     string distro = String.Empty;
@@ -419,6 +423,161 @@ namespace DshWebManager
                     FileLog.Error("ApplyDshUpdate: " + ex.Message);
                 }
             });
+        }
+
+        /// <summary>On-demand manager update check (menu 检查管理器更新).</summary>
+        public void CheckForManagerUpdate()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    ManagerUpdater.ReleaseInfo rel = ManagerUpdater.GetLatestRelease(_config.ManagerUpdateApi);
+                    string cur = ManagerUpdater.CurrentVersion();
+                    if (rel == null)
+                    {
+                        Balloon("dsh web manager", "检查管理器更新失败（网络或 GitHub 不可达）");
+                        return;
+                    }
+                    if (!rel.HasRelease || String.IsNullOrEmpty(rel.Tag))
+                    {
+                        Balloon("dsh web manager", "GitHub 上还没有发布版本，当前为 v" + cur);
+                        return;
+                    }
+                    _config.LastManagerCheckUtc = DateTime.UtcNow.ToString("o");
+                    _config.LastKnownManagerLatest = rel.Tag;
+                    _config.Save();
+                    if (ManagerUpdater.IsNewer(rel.Tag, cur))
+                        Balloon("dsh web manager", "发现新版本 " + rel.Tag + "（当前 v" + cur + "），可在「更新 dsh web manager」一键更新。");
+                    else
+                        Balloon("dsh web manager", "已是最新版本 (v" + cur + ")");
+                }
+                catch (Exception ex) { FileLog.Error("CheckForManagerUpdate: " + ex.Message); }
+            });
+        }
+
+        /// <summary>Startup update check, throttled to 24 h; only balloons when newer.</summary>
+        private void CheckManagerUpdateThrottled()
+        {
+            DateTime last;
+            DateTime.TryParse(_config.LastManagerCheckUtc, out last);
+            if (DateTime.UtcNow.Subtract(last) < TimeSpan.FromHours(24)) return;
+            ManagerUpdater.ReleaseInfo rel = ManagerUpdater.GetLatestRelease(_config.ManagerUpdateApi);
+            if (rel == null || !rel.HasRelease || String.IsNullOrEmpty(rel.Tag)) return;
+            _config.LastManagerCheckUtc = DateTime.UtcNow.ToString("o");
+            _config.LastKnownManagerLatest = rel.Tag;
+            _config.Save();
+            string cur = ManagerUpdater.CurrentVersion();
+            if (ManagerUpdater.IsNewer(rel.Tag, cur))
+                Balloon("dsh web manager", "发现 dsh web manager 新版本 " + rel.Tag + "（当前 v" + cur + "），可在托盘菜单「更新 dsh web manager」中更新。");
+        }
+
+        /// <summary>One-click manager self-update: fetch the release exe, verify it,
+        /// hand off to a detached updater that swaps the binary once we exit, then
+        /// restart the tray without stopping any dsh service.</summary>
+        public void ApplyManagerUpdate()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    ManagerUpdater.ReleaseInfo rel = ManagerUpdater.GetLatestRelease(_config.ManagerUpdateApi);
+                    string cur = ManagerUpdater.CurrentVersion();
+                    if (rel == null)
+                    {
+                        Balloon("dsh web manager", "检查管理器更新失败（网络或 GitHub 不可达）");
+                        return;
+                    }
+                    if (!rel.HasRelease || String.IsNullOrEmpty(rel.Tag))
+                    {
+                        Balloon("dsh web manager", "GitHub 上还没有发布版本，当前为 v" + cur);
+                        return;
+                    }
+                    if (!ManagerUpdater.IsNewer(rel.Tag, cur))
+                    {
+                        Balloon("dsh web manager", "已是最新版本 (v" + cur + ")");
+                        return;
+                    }
+                    if (String.IsNullOrEmpty(rel.DownloadUrl))
+                    {
+                        FileLog.Error("ApplyManagerUpdate: release " + rel.Tag + " has no dsh-web-manager.exe asset");
+                        Balloon("dsh web manager", "发布 " + rel.Tag + " 未附带 dsh-web-manager.exe，无法自动更新");
+                        return;
+                    }
+                    Balloon("dsh web manager", "正在下载 dsh web manager " + rel.Tag + " …");
+                    string updateDir = Path.Combine(AppPaths.DataRoot, "update");
+                    Directory.CreateDirectory(updateDir);
+                    string newExe = Path.Combine(updateDir, "dsh-web-manager.new.exe");
+                    try { if (File.Exists(newExe)) File.Delete(newExe); } catch { }
+                    if (!ManagerUpdater.Download(rel.DownloadUrl, newExe))
+                    {
+                        Balloon("dsh web manager", "下载失败，请稍后重试");
+                        return;
+                    }
+                    string dlVersion = ManagerUpdater.DownloadedVersion(newExe);
+                    if (!String.IsNullOrEmpty(dlVersion) && !ManagerUpdater.IsNewer(dlVersion, cur))
+                    {
+                        FileLog.Error("ApplyManagerUpdate: downloaded exe version " + dlVersion + " not newer than " + cur);
+                        Balloon("dsh web manager", "下载的文件版本异常 (" + dlVersion + ")，已取消更新");
+                        return;
+                    }
+                    FileLog.Info("ApplyManagerUpdate: v" + cur + " -> " + rel.Tag + " (file " + dlVersion + ")");
+                    string ps1 = Path.Combine(updateDir, "apply-update.ps1");
+                    WriteUpdaterScript(ps1, newExe);
+                    System.Diagnostics.Process.Start("powershell.exe",
+                        "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + ps1 + "\"");
+                    FileLog.Info("ApplyManagerUpdate: updater spawned, exiting");
+                    Balloon("dsh web manager", "正在更新 dsh web manager（v" + cur + " → " + rel.Tag + "），数秒后自动重启");
+                    // Let the balloon paint, then exit without stopping dsh services.
+                    Thread.Sleep(1500);
+                    ExitForUpdate();
+                }
+                catch (Exception ex)
+                {
+                    FileLog.Error("ApplyManagerUpdate: " + ex.ToString());
+                    try { Balloon("dsh web manager", "更新管理器失败: " + ex.Message); } catch { }
+                }
+            });
+        }
+
+        /// <summary>Exits the tray without stopping dsh services so the detached
+        /// updater can replace this EXE; on restart the manager re-attaches to the
+        /// still-running dsh instances.</summary>
+        public void ExitForUpdate()
+        {
+            _disposed = true;
+            Environment.Exit(0);
+        }
+
+        /// <summary>Writes the detached self-update script (pure ASCII, PS 5.1 safe):
+        /// waits for this EXE to unlock, swaps in the downloaded binary and restarts
+        /// the tray. Paths are single-quoted so PowerShell never mangles them.</summary>
+        private static void WriteUpdaterScript(string path, string newExe)
+        {
+            string target = AppPaths.ExePath;
+            string log = Path.Combine(AppPaths.LogDir, "manager-update.log");
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("$ErrorActionPreference = 'Stop'");
+            sb.AppendLine("$target = '" + target + "'");
+            sb.AppendLine("$new = '" + newExe + "'");
+            sb.AppendLine("$log = '" + log + "'");
+            sb.AppendLine("function Log($m) { try { Add-Content -Path $log -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + ' ' + $m) } catch {} }");
+            sb.AppendLine("Log 'updater started'");
+            sb.AppendLine("$unlocked = $false");
+            sb.AppendLine("for ($i = 0; $i -lt 120; $i++) {");
+            sb.AppendLine("  Start-Sleep -Milliseconds 500");
+            sb.AppendLine("  try { $fs = [System.IO.File]::Open($target, 'Open', 'ReadWrite', 'None'); $fs.Close(); $unlocked = $true; break } catch {}");
+            sb.AppendLine("}");
+            sb.AppendLine("if (-not $unlocked) { Log 'FAILED: manager exe stayed locked for 60s'; exit 1 }");
+            sb.AppendLine("$copied = $false");
+            sb.AppendLine("for ($i = 0; $i -lt 10; $i++) {");
+            sb.AppendLine("  try { Copy-Item -Force -LiteralPath $new -Destination $target; $copied = $true; break } catch { Start-Sleep -Milliseconds 500 }");
+            sb.AppendLine("}");
+            sb.AppendLine("if (-not $copied) { Log 'FAILED: copy failed after retries'; exit 1 }");
+            sb.AppendLine("Log 'replaced exe'");
+            sb.AppendLine("try { Start-Process -FilePath $target -ArgumentList 'tray'; Log 'restarted' }");
+            sb.AppendLine("catch { Log ('FAILED: ' + $_.Exception.Message) }");
+            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
         }
 
         public void Restart()

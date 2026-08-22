@@ -16,6 +16,10 @@ namespace DshWebManager
             AppPaths.EnsureDirectories();
             FileLog.Info("dsh web manager starting, action=" + action + ", exe=" + AppPaths.ExePath);
 
+            // GitHub requires TLS 1.2+; .NET Framework may default to older protocols.
+            try { System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12; }
+            catch { }
+
             AppDomain.CurrentDomain.UnhandledException += delegate(object sender, UnhandledExceptionEventArgs e)
             {
                 FileLog.Error("Unhandled: " + (e.ExceptionObject == null ? "null" : e.ExceptionObject.ToString()));
