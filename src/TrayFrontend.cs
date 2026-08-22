@@ -28,8 +28,9 @@ namespace DshWebManager
         private string _pendingStatus;
         private bool _statusFlushPending;
         private bool _closing;
-        private const int MenuWidth = 250;
+        private const int MenuWidth = 220;
         private const int StatusItemHeight = 46;   // two lines, fixed so the panel never resizes on status change
+        private const int ItemHeight = 32;          // standard item height, tall enough to hit submenus
 
         private static string MenuOpen = "\u6253\u5f00\u7a97\u53e3";            // 打开窗口
         private static string MenuRestart = "\u91cd\u542f\u670d\u52a1";        // 重启服务
@@ -175,6 +176,10 @@ namespace DshWebManager
                 if (item is ToolStripSeparator) continue;
                 item.AutoSize = false;
                 item.Width = MenuWidth;
+                // Give every non-host, non-status item a comfortable fixed height so
+                // the cursor can travel from a parent item into its submenu dropdown.
+                if (!(item is ToolStripControlHost) && item != _statusItem)
+                    item.Height = ItemHeight;
             }
             if (_statusItem != null)
             {
