@@ -23,14 +23,11 @@ namespace DshWebManager
         private readonly System.Collections.Generic.List<ToolStripMenuItem> _instanceItems =
             new System.Collections.Generic.List<ToolStripMenuItem>();
         private ToolStripMenuItem _instancesMenu;
-        private int _menuFixedBottom = -1;
-        private int _menuFixedLeft = -1;
         private string _pendingStatus;
         private bool _statusFlushPending;
         private bool _closing;
-        private const int MenuWidth = 220;
-        private const int StatusItemHeight = 46;   // two lines, fixed so the panel never resizes on status change
-        private const int ItemHeight = 32;          // standard item height, tall enough to hit submenus
+        private const int MenuMinimumWidth = 220;
+        private const int StatusItemHeight = 46;   // fixed two-line status height
 
         private static string MenuOpen = "\u6253\u5f00\u7a97\u53e3";            // 打开窗口
         private static string MenuRestart = "\u91cd\u542f\u670d\u52a1";        // 重启服务
@@ -40,6 +37,7 @@ namespace DshWebManager
         private static string MenuBackendWindows = "Windows \u672c\u673a";     // Windows 本机
         private static string MenuBackendWsl = "WSL";
         private static string MenuWslMode = "WSL \u670d\u52a1\u6a21\u5f0f";       // WSL 服务模式
+        private static string MenuWindowsMode = "Windows \u670d\u52a1\u6a21\u5f0f"; // Windows 服务模式（占位，保持菜单高度）
         private static string MenuWslModeWrapper = "wrapper (\u81ea\u6108\u811a\u672c)";  // wrapper (自愈脚本)
         private static string MenuWslModeSystemd = "systemd (unit)";
         private static string MenuInstances = "\u5b9e\u4f8b";                    // 实例
@@ -76,7 +74,7 @@ namespace DshWebManager
             _btnWindows.Width = 96;
             _btnWindows.Height = 30;
             _btnWindows.Cursor = Cursors.Hand;
-            _btnWindows.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); AnchorMenuBottom(); };
+            _btnWindows.Click += delegate { _service.ActiveBackend = "windows"; RefreshBackendCheck(); };
 
             _btnWsl = new Button();
             _btnWsl.Text = MenuBackendWsl;
@@ -85,7 +83,7 @@ namespace DshWebManager
             _btnWsl.Width = 96;
             _btnWsl.Height = 30;
             _btnWsl.Cursor = Cursors.Hand;
-            _btnWsl.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); AnchorMenuBottom(); };
+            _btnWsl.Click += delegate { _service.ActiveBackend = "wsl"; RefreshBackendCheck(); };
 
             FlowLayoutPanel switcher = new FlowLayoutPanel();
             switcher.FlowDirection = FlowDirection.LeftToRight;
@@ -127,12 +125,9 @@ namespace DshWebManager
             RebuildInstanceMenu();
 
             _menu = new ContextMenuStrip();
-            _menu.Renderer = new ToolStripProfessionalRenderer(new TrayColorTable());
+            _menu.Renderer = new TrayRenderer();
             _menu.ShowImageMargin = false;
-            // Double-buffer the dropdown so hover repaints don't flicker/lag.
-            System.Reflection.PropertyInfo pi = typeof(ToolStrip).GetProperty(
-                "DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (pi != null) pi.SetValue(_menu, true, null);
+            _menu.MinimumSize = new Size(MenuMinimumWidth, 0);
             _menu.Items.Add(switcherHost);        // 顶部: 横向 Windows/WSL 切换按钮
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(new ToolStripMenuItem(MenuOpen, null, delegate { _service.OpenWindow(); }));
@@ -152,8 +147,7 @@ namespace DshWebManager
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(new ToolStripMenuItem(MenuExit, null, delegate { _closing = true; _service.Exit(true); }));
 
-            _notify.ContextMenuStrip = _menu;   // standard tray popup: click-outside closes, no extra taskbar buttons
-            _menu.Opening += OnMenuOpening;
+            _notify.ContextMenuStrip = _menu;   // native tray popup: system owns position, focus and dismissal
             _notify.MouseClick += OnMouseClick;
 
             _service.StatusChanged += s => UpdateStatus(s);
@@ -161,35 +155,37 @@ namespace DshWebManager
             _service.InstancesChanged += RebuildInstanceMenu;
 
             ApplyThemeToSubmenus();
-            FixItemLayout();
+            _statusItem.AutoSize = false;
+            _statusItem.Height = StatusItemHeight;
+            _statusItem.Width = MenuMinimumWidth;
             UpdateStatus(_service.Controller.StatusText);
         }
 
-        /// <summary>Pin every item to a fixed width and the status item to a fixed
-        /// two-line height, so the menu width/height never churns when the status
-        /// text switches between one and two lines (which caused panel resizing
-        /// and per-item height jumps on every backend switch).</summary>
-        private void FixItemLayout()
+        /// <summary>Small, deterministic renderer: native item sizing, immediate
+        /// hover paint, explicit arrows and separators. No gradients or animations.</summary>
+        private sealed class TrayRenderer : ToolStripProfessionalRenderer
         {
-            foreach (ToolStripItem item in _menu.Items)
+            private static readonly Color Hover = Color.FromArgb(0xE8, 0xF0, 0xFE);
+            private static readonly Color Border = Color.FromArgb(0x2D, 0x7F, 0xFF);
+
+            public TrayRenderer() : base(new TrayColorTable()) { RoundedEdges = false; }
+
+            protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
             {
-                if (item is ToolStripSeparator) continue;
-                item.AutoSize = false;
-                item.Width = MenuWidth;
-                // Give every non-host, non-status item a comfortable fixed height so
-                // the cursor can travel from a parent item into its submenu dropdown.
-                if (!(item is ToolStripControlHost) && item != _statusItem)
-                    item.Height = ItemHeight;
+                Rectangle r = new Rectangle(Point.Empty, e.Item.Size);
+                Color c = e.Item.Selected ? Hover : e.ToolStrip.BackColor;
+                using (SolidBrush b = new SolidBrush(c)) e.Graphics.FillRectangle(b, r);
+                if (e.Item.Selected)
+                    using (Pen p = new Pen(Border)) e.Graphics.DrawRectangle(p, 0, 0, r.Width - 1, r.Height - 1);
             }
-            if (_statusItem != null)
+
+            protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
             {
-                _statusItem.AutoSize = false;
-                _statusItem.Width = MenuWidth;
-                _statusItem.Height = StatusItemHeight;
+                e.ArrowColor = Color.FromArgb(0x55, 0x55, 0x55);
+                base.OnRenderArrow(e);
             }
         }
 
-        /// <summary>Light menu theme: white background, blue selection, subtle separators.</summary>
         private sealed class TrayColorTable : ProfessionalColorTable
         {
             public override Color ToolStripDropDownBackground { get { return Color.White; } }
@@ -289,6 +285,7 @@ namespace DshWebManager
             _instancesMenu.DropDownItems.Add(new ToolStripSeparator());
             _instancesMenu.DropDownItems.Add(new ToolStripMenuItem(MenuAddInstance, null, delegate { ShowAddInstanceDialog(); }));
             _instancesMenu.DropDownItems.Add(new ToolStripMenuItem(MenuRemoveInstance, null, delegate { ShowRemoveInstanceDialog(); }));
+            if (_menu != null) ApplyThemeToSubmenus();
         }
 
         private void ShowAddInstanceDialog()
@@ -321,37 +318,6 @@ namespace DshWebManager
                 _service.OpenWindow();
         }
 
-        /// <summary>After the standard tray popup appears, re-anchor it with a fixed
-        /// bottom edge (screen bottom) so backend switching only moves the top.</summary>
-        private void OnMenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
-        {
-            // Re-anchor X each time the menu opens; while it stays open (backend
-            // switching) only the top moves so the panel never drifts horizontally.
-            _menuFixedLeft = -1;
-            BeginInvoke(new Action(AnchorMenuBottom));
-        }
-
-        private void AnchorMenuBottom()
-        {
-            try
-            {
-                if (!_menu.Visible) return;
-                Screen screen = Screen.FromPoint(Cursor.Position);
-                _menuFixedBottom = screen.WorkingArea.Bottom - 4;
-                // Use the menu's already-laid-out Width/Height instead of
-                // GetPreferredSize (which forces a full re-measure of every item + the
-                // hosted FlowLayoutPanel — the main source of tray jank on switching).
-                if (_menuFixedLeft < 0)
-                {
-                    int x = Cursor.Position.X - _menu.Width;
-                    if (x < screen.WorkingArea.Left) x = screen.WorkingArea.Left;
-                    _menuFixedLeft = x;
-                }
-                _menu.Location = new Point(_menuFixedLeft, _menuFixedBottom - _menu.Height);
-            }
-            catch { }
-        }
-
         /// <summary>Submenu ToolStripDropDowns do not inherit the parent menu's renderer;
         /// apply the light theme to every nested menu so hover/selection colors match.</summary>
         private void ApplyThemeToSubmenus()
@@ -371,11 +337,16 @@ namespace DshWebManager
         {
             try
             {
+                // Accessing DropDown on a leaf item creates an empty native popup
+                // window (extra taskbar button / missing arrows). Only real menus get one.
+                if (parent.DropDownItems.Count == 0) return;
                 parent.DropDown.Renderer = _menu.Renderer;
+                ToolStripDropDownMenu dropMenu = parent.DropDown as ToolStripDropDownMenu;
+                if (dropMenu != null) dropMenu.ShowImageMargin = false;
                 foreach (ToolStripItem item in parent.DropDownItems)
                 {
                     ToolStripDropDownItem sub = item as ToolStripDropDownItem;
-                    if (sub != null) ApplySubmenuRenderer(sub);
+                    if (sub != null && sub.DropDownItems.Count > 0) ApplySubmenuRenderer(sub);
                 }
             }
             catch { }
@@ -471,7 +442,15 @@ namespace DshWebManager
                     if (_btnWsl.BackColor != bg) _btnWsl.BackColor = bg;
                     if (_btnWsl.ForeColor != fg) _btnWsl.ForeColor = fg;
                 }
-                if (_modeMenu != null && _modeMenu.Visible != wsl) _modeMenu.Visible = wsl;
+                // Keep this row present at all times: hiding/showing an item forced a
+                // full native menu resize on every backend switch. Windows gets a
+                // disabled same-height placeholder; WSL gets the real submenu.
+                if (_modeMenu != null)
+                {
+                    string modeText = wsl ? MenuWslMode : MenuWindowsMode;
+                    if (_modeMenu.Text != modeText) _modeMenu.Text = modeText;
+                    if (_modeMenu.Enabled != wsl) _modeMenu.Enabled = wsl;
+                }
                 bool defWsl = String.Equals(_service.DefaultBackend, "wsl", StringComparison.OrdinalIgnoreCase);
                 if (_defaultWslItem != null && _defaultWslItem.Checked != defWsl) _defaultWslItem.Checked = defWsl;
                 if (_defaultWindowsItem != null && _defaultWindowsItem.Checked != !defWsl) _defaultWindowsItem.Checked = !defWsl;
