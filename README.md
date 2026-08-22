@@ -150,6 +150,10 @@ insert 与手拷目录，避免出现两套桥（双桥会抢同一个 `DSH_BRID
   - 更新包下载到 `%LOCALAPPDATA%\dsh-web-manager\update\`，更新过程记录在
     `%LOCALAPPDATA%\dsh-web-manager\logs\manager-update.log`。
   - 启动时也会做一次 24h 节流的管理器版本检查，发现新版才弹通知。
+- **更新 dsh 插件包**：一键刷新 dsh profile 里的 `dsh-web-manager` 插件（bridge + 快捷方式
+  脚本）。自动读取 profile `package.json` 中记录的安装来源（如 `file:/home/.../dsh-web-manager`），
+  执行 `dsh plugin --profile <p> remove` + `add <spec>`，重启 dsh 后生效。来源可通过配置
+  `PluginUpdateSpec` 覆盖。
 
 ### 发布新版本（给维护者）
 
@@ -186,6 +190,21 @@ gh release create v3.0.1 dist/dsh-web-manager.exe --title "dsh web manager v3.0.
 | `LastVersionCheckUtc` / `LastKnownLatest` | dsh 更新检查节流时间戳 / 已知最新版本 | `""` |
 | `LastManagerCheckUtc` / `LastKnownManagerLatest` | 管理器更新检查节流时间戳 / 已知最新版本 | `""` |
 | `ManagerUpdateApi` | 管理器 Release API 覆盖地址（留空用官方 GitHub；测试/镜像用） | `""` |
+| `PluginUpdateSpec` | 插件包安装来源覆盖（留空自动从 profile 的 package.json 探测） | `""` |
+
+## WSL 命令：dsh-webui
+
+Linux 端注册了 `dsh-webui` 命令（插件在 WSL 启动时自动安装到 `~/.local/bin/`），用于从
+WSL 里手动打开**独立窗口**——它把请求转发给共享的 Windows 托盘管理器，由管理器拉起
+Edge `--app` 独立窗口（无需记忆端口/URL）：
+
+```bash
+dsh-webui            # 打开 WSL 后端独立窗口（默认）
+dsh-webui wsl        # 同上
+dsh-webui windows    # 打开 Windows 后端独立窗口
+```
+
+未安装插件时手动注册：`install -D -m 755 scripts/dsh-webui ~/.local/bin/dsh-webui`。
 
 ## 开发
 
@@ -230,6 +249,9 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 - **v3.1 管理器自更新**：GitHub Releases 查询/比对（跳过 prerelease）+ 下载校验 +
   脱离式更新脚本（等 exe 解锁 → 替换 → 托盘重启，不停止 dsh）+ 托盘「检查管理器更新 /
   更新 dsh web manager」+ 启动时 24h 节流检查 + `updatemanager` 控制动作 ✅ 已交付
+- **v3.1 插件包更新 + dsh-webui**：托盘「更新 dsh 插件包」（自动探测 profile 安装来源，
+  `dsh plugin remove/add` 一键刷新）+ Linux 端 `dsh-webui` 命令（转发给共享管理器打开
+  独立窗口，插件自动注册到 `~/.local/bin`）✅ 已交付
 
 ## 许可
 

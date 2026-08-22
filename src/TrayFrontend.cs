@@ -47,6 +47,7 @@ namespace DshWebManager
         private static string MenuUpdateDsh = "\u66f4\u65b0 dsh";                // 更新 dsh
         private static string MenuCheckManagerUpdate = "\u68c0\u67e5\u7ba1\u7406\u5668\u66f4\u65b0"; // 检查管理器更新
         private static string MenuUpdateManager = "\u66f4\u65b0 dsh web manager"; // 更新 dsh web manager
+        private static string MenuUpdatePlugin = "\u66f4\u65b0 dsh \u63d2\u4ef6\u5305";     // 更新 dsh 插件包
         private static string MenuAddInstance = "\u6dfb\u52a0\u5b9e\u4f8b";       // 添加实例
         private static string MenuRemoveInstance = "\u5220\u9664\u5b9e\u4f8b";    // 删除实例
         private static string MenuCloseInstance = "\u5173\u95ed\u5b9e\u4f8b";        // 关闭实例
@@ -146,12 +147,15 @@ namespace DshWebManager
             ToolStripMenuItem updateItem = new ToolStripMenuItem(MenuUpdateDsh, null, delegate { _service.ApplyDshUpdate(); });
             ToolStripMenuItem mgrCheckItem = new ToolStripMenuItem(MenuCheckManagerUpdate, null, delegate { _service.CheckForManagerUpdate(); });
             ToolStripMenuItem mgrUpdateItem = new ToolStripMenuItem(MenuUpdateManager, null, delegate { _service.ApplyManagerUpdate(); });
+            ToolStripMenuItem pluginUpdateItem = new ToolStripMenuItem(MenuUpdatePlugin, null, delegate { _service.UpdatePluginBundle(); });
             ToolStripMenuItem updatesMenu = new ToolStripMenuItem("\u66f4\u65b0"); // 更新
             updatesMenu.DropDownItems.Add(checkItem);
             updatesMenu.DropDownItems.Add(updateItem);
             updatesMenu.DropDownItems.Add(new ToolStripSeparator());
             updatesMenu.DropDownItems.Add(mgrCheckItem);
             updatesMenu.DropDownItems.Add(mgrUpdateItem);
+            updatesMenu.DropDownItems.Add(new ToolStripSeparator());
+            updatesMenu.DropDownItems.Add(pluginUpdateItem);
             _menu.Items.Add(updatesMenu);
             _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(_statusItem);

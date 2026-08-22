@@ -52,6 +52,7 @@ namespace DshWebManager
         public string LastManagerCheckUtc { get; set; } // manager self-update check throttle (v3.1)
         public string LastKnownManagerLatest { get; set; } // last known latest manager version (v3.1)
         public string ManagerUpdateApi { get; set; }    // release API override ("" = GitHub official; v3.1)
+        public string PluginUpdateSpec { get; set; }    // plugin bundle install spec override ("" = auto-detect; v3.1)
         public string Profile { get; set; }        // dsh profile name (default web)
         public string Version { get; set; }
 
@@ -125,6 +126,7 @@ namespace DshWebManager
             LastManagerCheckUtc = String.Empty;
             LastKnownManagerLatest = String.Empty;
             ManagerUpdateApi = String.Empty;
+            PluginUpdateSpec = String.Empty;
             Profile = "web";
             Version = "3.0.0";
             Instances = null; // null = legacy single-instance mode
@@ -156,6 +158,7 @@ namespace DshWebManager
                         if (loaded.LastManagerCheckUtc == null) loaded.LastManagerCheckUtc = String.Empty;
                         if (loaded.LastKnownManagerLatest == null) loaded.LastKnownManagerLatest = String.Empty;
                         if (loaded.ManagerUpdateApi == null) loaded.ManagerUpdateApi = String.Empty;
+                        if (loaded.PluginUpdateSpec == null) loaded.PluginUpdateSpec = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
                         if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.0.0";
                         return loaded;

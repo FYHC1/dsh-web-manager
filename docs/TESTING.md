@@ -182,3 +182,11 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 
 > 真实发布走 `gh release create vX.Y.Z dist/dsh-web-manager.exe`；自更新仅接受非 prerelease 的
 > release，且要求资产名为 `dsh-web-manager.exe`。
+
+## 插件包更新 + dsh-webui 测试矩阵 — 2026-08-22 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| JJJ | `updateplugin` 控制动作 | `dsh-web-manager.exe updateplugin` | ✅ 自动探测 spec `file:/home/hgl/projects/dsh/dsh-web-manager` → `dsh plugin remove/add` → profile package.json 的 dependencies 与 bundles 完整保留，node_modules 刷新为新内容（含新增 scripts/dsh-webui） |
+| KKK | `dsh-webui` 打开独立窗口 | WSL 内 `bash scripts/dsh-webui` | ✅ 转发 `open wsl` → 管理器 Launch Edge --app :3080 + AUMID 应用；未装管理器时给出安装提示 |
+| LLL | 插件自动注册 dsh-webui | 运行插件 ensure-shortcut.sh | ✅ 幂等：复用共享管理器、快捷方式已正确则跳过、`install -m 755` 注册 `~/.local/bin/dsh-webui` |

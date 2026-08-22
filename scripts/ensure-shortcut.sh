@@ -24,3 +24,14 @@ fi
 WIN_PS1="$(wslpath -w "$SCRIPT_DIR/ensure-shortcut.ps1" 2>/dev/null || echo "$SCRIPT_DIR/ensure-shortcut.ps1")"
 
 "$PS" -NoProfile -ExecutionPolicy Bypass -File "$WIN_PS1" -Backend wsl
+
+# Register the dsh-webui command: open the standalone window from WSL via the
+# shared tray manager (idempotent; refreshed on every plugin update).
+if [ -f "$SCRIPT_DIR/dsh-webui" ]; then
+  mkdir -p "$HOME/.local/bin" 2>/dev/null || true
+  if install -m 755 "$SCRIPT_DIR/dsh-webui" "$HOME/.local/bin/dsh-webui" 2>/dev/null; then
+    echo "[ensure-shortcut] registered ~/.local/bin/dsh-webui"
+  else
+    echo "[ensure-shortcut] could not register ~/.local/bin/dsh-webui" >&2
+  fi
+fi

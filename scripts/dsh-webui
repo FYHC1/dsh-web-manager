@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# dsh-webui — open the standalone dsh web window from inside WSL.
+#
+# Delegates to the shared Windows tray manager (dsh-web-manager.exe), which
+# opens the Edge --app window for the requested backend (default: wsl, since
+# this command lives on the Linux side). If the manager is not installed yet,
+# prints how to install it instead of failing silently.
+#
+# Usage:
+#   dsh-webui            # open the WSL backend standalone window
+#   dsh-webui wsl        # same
+#   dsh-webui windows    # open the Windows backend standalone window
+set -euo pipefail
+
+BACKEND="${1:-wsl}"
+case "$BACKEND" in
+  wsl|windows) ;;
+  -h|--help|help)
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0 ;;
+  *)
+    echo "dsh-webui: unknown backend '$BACKEND' (wsl|windows)" >&2
+    exit 2 ;;
+esac
+
+# WSL interop may be dropped by systemd=true; restore it so Windows EXEs can run.
+if grep -qi microsoft /proc/version 2>/dev/null && [ ! -e /proc/sys/fs/binfmt_misc/WSLInterop ] 2>/dev/null; then
+  echo ':WSLInterop:M::MZ::/init:PF' | sudo -n tee /proc/sys/fs/binfmt_misc/register >/dev/null 2>&1 || true
+fi
+
+# Locate Windows PowerShell (not on the WSL PATH, so absolute first).
+PS=""
+if [ -f /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe ]; then
+  PS="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+elif command -v powershell.exe >/dev/null 2>&1; then
+  PS="$(command -v powershell.exe)"
+else
+  echo "dsh-webui: Windows PowerShell not reachable (WSL interop unavailable)" >&2
+  exit 1
+fi
+
+# Resolve %LOCALAPPDATA% on the Windows side, then map it to a WSL path.
+LOCALAPPDATA="$("$PS" -NoProfile -Command "[Environment]::GetFolderPath('LocalApplicationData')" 2>/dev/null | tr -d '\r' | tail -1)"
+if [ -z "$LOCALAPPDATA" ]; then
+  echo "dsh-webui: could not resolve %LOCALAPPDATA% on Windows" >&2
+  exit 1
+fi
+
+EXE_WIN="$LOCALAPPDATA\\dsh-web-manager\\app\\dsh-web-manager.exe"
+EXE="$(wslpath -u "$EXE_WIN" 2>/dev/null || echo "$EXE_WIN")"
+if [ ! -f "$EXE" ]; then
+  echo "dsh-webui: dsh web manager not installed yet ($EXE_WIN)" >&2
+  echo "  Install it by installing the dsh-web-manager plugin inside dsh, or run on" >&2
+  echo "  Windows: powershell -ExecutionPolicy Bypass -File scripts\\Install.ps1" >&2
+  exit 1
+fi
+
+echo "dsh-webui: opening $BACKEND standalone window via dsh web manager"
+"$EXE" open "$BACKEND"

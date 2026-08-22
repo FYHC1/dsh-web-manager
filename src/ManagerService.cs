@@ -540,6 +540,71 @@ namespace DshWebManager
             });
         }
 
+        /// <summary>One-click refresh of the dsh-web-manager plugin bundle inside the
+        /// WSL dsh profile: `dsh plugin remove` + `add` with the recorded spec
+        /// (auto-detected from the profile's package.json, or PluginUpdateSpec).</summary>
+        public void UpdatePluginBundle()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    string distro;
+                    if (!WslTools.ResolveDistro(_config.WslDistro, _config.LastWslDistro, out distro))
+                    {
+                        Balloon("dsh web manager", "未找到 WSL 发行版，无法更新插件包");
+                        return;
+                    }
+                    string profile = String.IsNullOrWhiteSpace(_config.Profile) ? "web" : _config.Profile;
+                    string spec = String.IsNullOrWhiteSpace(_config.PluginUpdateSpec)
+                        ? ReadPluginSpec(distro, profile)
+                        : _config.PluginUpdateSpec;
+                    if (String.IsNullOrWhiteSpace(spec))
+                    {
+                        FileLog.Error("UpdatePluginBundle: no spec recorded for dsh-web-manager in profile " + profile);
+                        Balloon("dsh web manager", "未找到插件的安装来源，请在 config 中设置 PluginUpdateSpec");
+                        return;
+                    }
+                    FileLog.Info("UpdatePluginBundle: refreshing " + profile + " with spec " + spec);
+                    Balloon("dsh web manager", "正在更新 dsh 插件包（" + profile + "）…");
+                    // Remove is best-effort (the package may not be installed yet).
+                    WslTools.RunCapture(distro, "bash", new string[] { "-lc",
+                        "dsh plugin --profile " + WslTools.BashQuote(profile) + " remove dsh-web-manager" }, 120000);
+                    CommandResult add = WslTools.RunCapture(distro, "bash", new string[] { "-lc",
+                        "dsh plugin --profile " + WslTools.BashQuote(profile) + " add " + WslTools.BashQuote(spec) }, 180000);
+                    if (add.ExitCode == 0)
+                        Balloon("dsh web manager", "dsh 插件包已更新（" + profile + "），重启 dsh 后生效");
+                    else
+                    {
+                        FileLog.Error("UpdatePluginBundle add failed: "
+                            + (add.StandardOutput ?? String.Empty) + (add.StandardError ?? String.Empty));
+                        Balloon("dsh web manager", "插件包更新失败，请查看日志");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    FileLog.Error("UpdatePluginBundle: " + ex.ToString());
+                    try { Balloon("dsh web manager", "更新插件包失败: " + ex.Message); } catch { }
+                }
+            });
+        }
+
+        /// <summary>Reads the recorded install spec of dsh-web-manager from the
+        /// profile's package.json (e.g. "file:/home/.../dsh-web-manager").
+        /// Empty when the package is not a direct dependency of the profile.</summary>
+        private static string ReadPluginSpec(string distro, string profile)
+        {
+            string script = "node -e 'const base=process.env.DSH_HOME||(process.env.HOME+\"/.dsh\");"
+                + "const p=base+\"/profiles/" + profile + "/package.json\";"
+                + "let d;try{d=require(p)}catch(e){process.exit(1)}"
+                + "const s=(d.dependencies&&d.dependencies[\"dsh-web-manager\"])"
+                + "||(d.optionalDependencies&&d.optionalDependencies[\"dsh-web-manager\"])||\"\";"
+                + "console.log(s)'";
+            CommandResult r = WslTools.RunCapture(distro, "bash", new string[] { "-lc", script }, 30000);
+            if (r.ExitCode != 0) return String.Empty;
+            return (r.StandardOutput ?? String.Empty).Trim();
+        }
+
         /// <summary>Exits the tray without stopping dsh services so the detached
         /// updater can replace this EXE; on restart the manager re-attaches to the
         /// still-running dsh instances.</summary>
