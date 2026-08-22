@@ -259,13 +259,13 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
   「未选择后端」）；④插件包更新提示具体更新的包与来源 ✅ 已交付
 - **v3.1 窗口尺寸记忆深度修复**：实例级配置修复后仍不生效的**真正根因**——Edge 150
   完全忽略 `--window-size`（fresh profile 实证：`--window-size=1500x800` 仍开 945×1020
-  默认尺寸），始终按自己保存的边界打开 `--app` 窗口；且 Chromium 窗口会拒绝未预填的
-  `SetWindowPlacement`（error 87）、对 `SetWindowPlacement` 的尺寸改动静默忽略。最终
-  根治方案：**启动带 `--start-minimized`**（窗口以最小化出现，错误尺寸不可见）→ 窗口
-  出现后**先 `GetWindowPlacement` 预填 → `SW_HIDE` 取消最小化 → `SetWindowPos` 应用
-  记忆尺寸 → `SW_SHOW` 显示**（全程不显示错误尺寸，无跳动）。另保留：启动时快照记忆
-  几何、CaptureSize 启动后 6 秒保持期（阻断覆盖循环）、启动前清除残留后台进程。
-  实测：打开/关窗重开均直接以记忆的 1665×1020 出现，配置稳定 ✅ 已交付
+  默认尺寸），始终按自己保存的边界打开 `--app` 窗口。最终方案：**正常启动（不最小化，
+  窗口一出现即可见）→ 直接轮询启动进程 `MainWindowHandle`（150ms，无 WMI 缓存）→
+  窗口出现后 ~0.2s 内 `SetWindowPos` 应用记忆尺寸**——窗口弹出快（Launch→调整 ~1.0s，
+  其中 ~0.8s 是 Edge 冷启动本身）、无最小化延迟、无隐藏闪烁；若窗口意外最小化则走
+  隐藏→调整→显示兜底。另保留：启动时快照记忆几何、CaptureSize 启动后 6 秒保持期
+  （阻断覆盖循环）、启动前清除残留后台进程。实测：打开/关窗重开均以记忆的
+  1665×1020 出现，配置稳定 ✅ 已交付
 
 ## 许可
 
