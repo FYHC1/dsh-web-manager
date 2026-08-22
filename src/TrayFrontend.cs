@@ -24,6 +24,7 @@ namespace DshWebManager
             new System.Collections.Generic.List<ToolStripMenuItem>();
         private ToolStripMenuItem _instancesMenu;
         private int _menuFixedBottom = -1;
+        private int _menuFixedLeft = -1;
         private string _pendingStatus;
         private bool _statusFlushPending;
         private bool _closing;
@@ -146,6 +147,7 @@ namespace DshWebManager
             _service.Balloon += (t, b) => ShowBalloon(t, b);
             _service.InstancesChanged += RebuildInstanceMenu;
 
+            ApplyThemeToSubmenus();
             UpdateStatus(_service.Controller.StatusText);
         }
 
@@ -285,6 +287,9 @@ namespace DshWebManager
         /// bottom edge (screen bottom) so backend switching only moves the top.</summary>
         private void OnMenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            // Re-anchor X each time the menu opens; while it stays open (backend
+            // switching) only the top moves so the panel never drifts horizontally.
+            _menuFixedLeft = -1;
             BeginInvoke(new Action(AnchorMenuBottom));
         }
 
@@ -295,10 +300,44 @@ namespace DshWebManager
                 if (!_menu.Visible) return;
                 Screen screen = Screen.FromPoint(Cursor.Position);
                 _menuFixedBottom = screen.WorkingArea.Bottom - 4;
-                Size sz = _menu.GetPreferredSize(Size.Empty);
-                int x = Cursor.Position.X - sz.Width; // right-align to the cursor
-                if (x < screen.WorkingArea.Left) x = screen.WorkingArea.Left;
-                _menu.Location = new Point(x, _menuFixedBottom - sz.Height);
+                if (_menuFixedLeft < 0)
+                {
+                    Size sz = _menu.GetPreferredSize(Size.Empty);
+                    int x = Cursor.Position.X - sz.Width; // right-align to the cursor
+                    if (x < screen.WorkingArea.Left) x = screen.WorkingArea.Left;
+                    _menuFixedLeft = x;
+                }
+                Size sz2 = _menu.GetPreferredSize(Size.Empty);
+                _menu.Location = new Point(_menuFixedLeft, _menuFixedBottom - sz2.Height);
+            }
+            catch { }
+        }
+
+        /// <summary>Submenu ToolStripDropDowns do not inherit the parent menu's renderer;
+        /// apply the light theme to every nested menu so hover/selection colors match.</summary>
+        private void ApplyThemeToSubmenus()
+        {
+            try
+            {
+                foreach (ToolStripItem item in _menu.Items)
+                {
+                    ToolStripDropDownItem mi = item as ToolStripDropDownItem;
+                    if (mi != null) ApplySubmenuRenderer(mi);
+                }
+            }
+            catch { }
+        }
+
+        private void ApplySubmenuRenderer(ToolStripDropDownItem parent)
+        {
+            try
+            {
+                parent.DropDown.Renderer = _menu.Renderer;
+                foreach (ToolStripItem item in parent.DropDownItems)
+                {
+                    ToolStripDropDownItem sub = item as ToolStripDropDownItem;
+                    if (sub != null) ApplySubmenuRenderer(sub);
+                }
             }
             catch { }
         }
