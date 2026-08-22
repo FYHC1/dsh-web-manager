@@ -144,7 +144,11 @@ namespace DshWebManager
             InstanceController c = new InstanceController(_config, inst);
             c.StatusChanged += OnControllerStatus;
             lock (_sync) { _controllers.Add(c); }
-            c.Start();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { c.Start(); }
+                catch (Exception ex) { FileLog.Error("AddInstance start: " + ex.Message); }
+            });
             var h = InstancesChanged; if (h != null) h();
         }
 
@@ -174,8 +178,12 @@ namespace DshWebManager
                 _controllers.Remove(c);
                 _hadWindows.Remove(c);
             }
-            try { c.Stop(false); } catch (Exception ex) { FileLog.Error("RemoveInstance stop failed: " + ex.Message); }
-            try { EdgeWindow.CloseWindow(c.ActivePort); } catch { }
+            // Stop off the UI thread (WSL stop can take seconds).
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { c.Stop(false); } catch (Exception ex) { FileLog.Error("RemoveInstance stop: " + ex.Message); }
+                try { EdgeWindow.CloseWindow(c.ActivePort); } catch { }
+            });
             var h = InstancesChanged; if (h != null) h();
         }
 
@@ -216,22 +224,20 @@ namespace DshWebManager
         {
             InstanceController c = GetController(index);
             if (c == null) return;
-            // Make sure the service is online first; a window pointing at a dead
-            // port is useless.
-            if (c.State == InstanceState.Stopped || c.State == InstanceState.Error)
+            // Window lookup/launch touches WMI and processes: run off the UI thread so
+            // the tray never freezes while opening a window.
+            ThreadPool.QueueUserWorkItem(_ =>
             {
-                ThreadPool.QueueUserWorkItem(_ =>
+                try
                 {
-                    try
-                    {
+                    // Make sure the service is online first; a window pointing at a
+                    // dead port is useless.
+                    if (c.State == InstanceState.Stopped || c.State == InstanceState.Error)
                         c.Start(); // may block up to the startup timeout
-                        OpenWindowCore(c);
-                    }
-                    catch (Exception ex) { FileLog.Error("OpenWindow(start) failed: " + ex.Message); }
-                });
-                return;
-            }
-            OpenWindowCore(c);
+                    OpenWindowCore(c);
+                }
+                catch (Exception ex) { FileLog.Error("OpenWindow failed: " + ex.Message); }
+            });
         }
 
         public InstanceController GetController(int index)
@@ -402,8 +408,12 @@ namespace DshWebManager
         {
             InstanceController c = ActiveController;
             if (c == null) return;
-            c.Restart();
-            OpenWindowAfterDelay();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { c.Restart(); }
+                catch (Exception ex) { FileLog.Error("Restart: " + ex.Message); }
+                OpenWindowAfterDelay();
+            });
         }
 
         /// <summary>Switches the WSL service mode (wrapper/systemd) and restarts the WSL instance.</summary>
@@ -422,14 +432,27 @@ namespace DshWebManager
                 Balloon("dsh web manager", "服务模式已是 " + mode);
                 return;
             }
-            bool hadWindow = EdgeWindow.FindAppWindow(Controller.ActivePort) != IntPtr.Zero;
-            try { Controller.Stop(true); }
-            catch (Exception ex) { FileLog.Error("SetWslMode stop failed: " + ex.Message); }
-            _config.WslServiceMode = mode.ToLowerInvariant();
-            _config.Save();
-            foreach (InstanceController c in _controllers) { c.Reconfigure(); c.Start(); }
-            if (hadWindow) OpenWindowAfterDelay();
-            Balloon("dsh web manager", "WSL 服务模式已切换: " + mode);
+            List<InstanceController> snapshot = Snapshot();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    bool hadWindow = false;
+                    foreach (InstanceController c in snapshot)
+                        if (EdgeWindow.FindAppWindow(c.ActivePort) != IntPtr.Zero) { hadWindow = true; break; }
+                    foreach (InstanceController c in snapshot)
+                    {
+                        try { c.Stop(true); }
+                        catch (Exception ex) { FileLog.Error("SetWslMode stop: " + ex.Message); }
+                    }
+                    _config.WslServiceMode = mode.ToLowerInvariant();
+                    _config.Save();
+                    foreach (InstanceController c in snapshot) { c.Reconfigure(); c.Start(); }
+                    if (hadWindow) OpenWindowAfterDelay();
+                }
+                catch (Exception ex) { FileLog.Error("SetWslMode: " + ex.Message); }
+            });
+            Balloon("dsh web manager", "WSL 服务模式切换中: " + mode);
         }
 
         /// <summary>Switches the service backend (windows/wsl) and restarts the instance.</summary>
@@ -443,14 +466,27 @@ namespace DshWebManager
                 Balloon("dsh web manager", "后端已是 " + type);
                 return;
             }
-            bool hadWindow = EdgeWindow.FindAppWindow(Controller.ActivePort) != IntPtr.Zero;
-            try { Controller.Stop(true); }
-            catch (Exception ex) { FileLog.Error("SetBackend stop failed: " + ex.Message); }
-            _config.BackendType = type.ToLowerInvariant();
-            _config.Save();
-            foreach (InstanceController c in _controllers) { c.Reconfigure(); c.Start(); }
-            if (hadWindow) OpenWindowAfterDelay();
-            Balloon("dsh web manager", "已切换到 " + Controller.BackendDescribe + " 后端");
+            List<InstanceController> snapshot = Snapshot();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    bool hadWindow = false;
+                    foreach (InstanceController c in snapshot)
+                        if (EdgeWindow.FindAppWindow(c.ActivePort) != IntPtr.Zero) { hadWindow = true; break; }
+                    foreach (InstanceController c in snapshot)
+                    {
+                        try { c.Stop(true); }
+                        catch (Exception ex) { FileLog.Error("SetBackend stop: " + ex.Message); }
+                    }
+                    _config.BackendType = type.ToLowerInvariant();
+                    _config.Save();
+                    foreach (InstanceController c in snapshot) { c.Reconfigure(); c.Start(); }
+                    if (hadWindow) OpenWindowAfterDelay();
+                }
+                catch (Exception ex) { FileLog.Error("SetBackend: " + ex.Message); }
+            });
+            Balloon("dsh web manager", "后端切换中: " + type);
         }
 
         private void OpenWindowAfterDelay()

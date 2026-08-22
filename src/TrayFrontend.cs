@@ -189,28 +189,35 @@ namespace DshWebManager
         {
             InstanceController c = _service.GetController(index);
             if (c == null) return;
-            c.Restart();
-            try
+            // Restarting a service can block for seconds (esp. WSL): do it off the UI thread.
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
             {
-                EdgeWindow.EnsureVisible(_service.Config, c.Backend.GetWindowUrl(c.ActivePort), c.ActivePort);
-            }
-            catch (Exception ex) { FileLog.Error("RestartInstance window: " + ex.Message); }
+                try
+                {
+                    c.Restart();
+                    EdgeWindow.EnsureVisible(_service.Config, c.Backend.GetWindowUrl(c.ActivePort), c.ActivePort);
+                }
+                catch (Exception ex) { FileLog.Error("RestartInstance: " + ex.Message); }
+            });
         }
 
         private void CloseInstance(int index)
         {
             InstanceController c = _service.GetController(index);
             if (c == null) return;
-            try
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
             {
-                c.Stop(false); // stop the service (managed: full stop; attached: detach)
-            }
-            catch (Exception ex) { FileLog.Error("CloseInstance stop: " + ex.Message); }
-            try
-            {
-                EdgeWindow.CloseWindow(c.ActivePort);
-            }
-            catch (Exception ex) { FileLog.Error("CloseInstance window: " + ex.Message); }
+                try
+                {
+                    c.Stop(false); // stop the service (managed: full stop; attached: detach)
+                }
+                catch (Exception ex) { FileLog.Error("CloseInstance stop: " + ex.Message); }
+                try
+                {
+                    EdgeWindow.CloseWindow(c.ActivePort);
+                }
+                catch (Exception ex) { FileLog.Error("CloseInstance window: " + ex.Message); }
+            });
         }
 
         /// <summary>Rebuilds the instance submenu from the live controller list (v3.0 P2-2).</summary>
@@ -298,6 +305,13 @@ namespace DshWebManager
         {
             try
             {
+                // StatusChanged fires from background threads (timer tick, thread pool,
+                // control pipe): marshal onto the UI thread before touching controls.
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action<string>(UpdateStatus), text);
+                    return;
+                }
                 // Show the active instance's compact StatusText (with runtime summary)
                 // instead of the raw event message, so the tray stays short/consistent.
                 InstanceController active = _service.Controller;
@@ -360,6 +374,12 @@ namespace DshWebManager
         {
             try
             {
+                // Balloon events come from background threads (update check, etc.).
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action<string, string>(ShowBalloon), title, text);
+                    return;
+                }
                 _notify.BalloonTipTitle = title;
                 _notify.BalloonTipText = text;
                 _notify.ShowBalloonTip(3000);
