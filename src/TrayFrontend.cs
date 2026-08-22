@@ -28,6 +28,8 @@ namespace DshWebManager
         private string _pendingStatus;
         private bool _statusFlushPending;
         private bool _closing;
+        private const int MenuWidth = 250;
+        private const int StatusItemHeight = 46;   // two lines, fixed so the panel never resizes on status change
 
         private static string MenuOpen = "\u6253\u5f00\u7a97\u53e3";            // 打开窗口
         private static string MenuRestart = "\u91cd\u542f\u670d\u52a1";        // 重启服务
@@ -158,7 +160,28 @@ namespace DshWebManager
             _service.InstancesChanged += RebuildInstanceMenu;
 
             ApplyThemeToSubmenus();
+            FixItemLayout();
             UpdateStatus(_service.Controller.StatusText);
+        }
+
+        /// <summary>Pin every item to a fixed width and the status item to a fixed
+        /// two-line height, so the menu width/height never churns when the status
+        /// text switches between one and two lines (which caused panel resizing
+        /// and per-item height jumps on every backend switch).</summary>
+        private void FixItemLayout()
+        {
+            foreach (ToolStripItem item in _menu.Items)
+            {
+                if (item is ToolStripSeparator) continue;
+                item.AutoSize = false;
+                item.Width = MenuWidth;
+            }
+            if (_statusItem != null)
+            {
+                _statusItem.AutoSize = false;
+                _statusItem.Width = MenuWidth;
+                _statusItem.Height = StatusItemHeight;
+            }
         }
 
         /// <summary>Light menu theme: white background, blue selection, subtle separators.</summary>
@@ -389,6 +412,8 @@ namespace DshWebManager
                 int sep = display.IndexOf(" · ");
                 if (sep >= 0)
                     display = display.Substring(0, sep) + Environment.NewLine + "  " + display.Substring(sep + 3);
+                else
+                    display = display + Environment.NewLine + "  "; // always two lines so the fixed-height status item stays stable
                 // Only touch controls whose text actually changed: setting Text on a
                 // ToolStrip item triggers a re-measure, and doing it on every event
                 // churned the layout (menu height/width jumps, hover paint lost).
