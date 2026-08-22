@@ -322,3 +322,16 @@ WinEventHook（CREATE..SHOW，无 DLL 注入）；目标进程集合 = 该端口
 | ZZZZ | H3: 程序集版本恒定 3.0.0.0 | AssemblyInfo/ManagerConfig/config.example 统一 3.4.0；自更新显示与实际版本一致 |
 | AAAA2 | M4: 更新检查失败仍推进 24h 节流并清空 LastKnownLatest | 仅 registry 查询成功才推进节流/持久化 |
 | BBBB2 | M6: `UpdatePluginBundle` 的 profile 缺空格/注入校验 | 与 `WslBackend.Start` 一致拒绝空格/制表符 |
+
+## 中优先级修复轮 — 2026-08-23 (v3.5)
+
+| # | 问题 | 修复 | 验证 |
+|---|------|------|------|
+| CCCC2 | M1: Tick 无重入守卫（Timer 1s，WMI 卡 3s 时并发 Tick） | `Interlocked.CompareExchange` 守卫 + finally 释放 | 代码审查确认；控制器层锁已有双重保护 |
+| DDDD2 | M2: 服务异常时每秒 spawn wsl.exe（IsServiceUp→ss / IsWrapperAlive→systemctl×2） | `IsServiceUp` WSL 探测 5s 缓存；systemd 单元检查 3s 缓存 | 失败路径探测频率 1s → 5s/3s |
+| EEEE2 | M3: `WslPortOwnerPid` 依赖 ss（iproute2） | ss 失败时兜底解析 `/proc/net/tcp`(+tcp6) LISTEN inode → `/proc/<pid>/fd` readlink 映射 pid；纯 bash 无管道 | 实测 `wsl.exe bash -lc` 传参 `$()`/`${}`/glob 正常；ss 正常时走原路径 |
+| FFFF2 | M5: 关闭实例/退出会停止附着服务（v3.3 语义）对"纯窗口管理"用户过强 | 新增 `StopAttached`（默认 true，legacy 配置缺省=true；false=仅解除附着） | 待实测：false 时 closeinstance 不停止外部 dsh |
+
+## 版本号规则（H3 延续）
+
+- 每次发布同步 bump `src/AssemblyInfo.cs`、`src/ManagerConfig.cs`（默认+Load 回退）、`config.example.json`；本次 v3.5.0。

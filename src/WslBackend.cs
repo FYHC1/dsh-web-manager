@@ -32,6 +32,15 @@ namespace DshWebManager
         private BridgeInfo _bridgeInfo;                 // cached runtime-bridge payload
         private DateTime _bridgeInfoAt = DateTime.MinValue;
         private static readonly TimeSpan BridgeInfoTtl = TimeSpan.FromSeconds(10);
+        // Failure-path probe throttles: both IsServiceUp (WSL-side ss) and
+        // IsWrapperAlive (systemd is-active) spawn wsl.exe processes; while a
+        // service is down the heartbeat would otherwise call them every second.
+        private DateTime _wslProbeAt = DateTime.MinValue;
+        private bool _wslProbeResult;
+        private static readonly TimeSpan WslProbeTtl = TimeSpan.FromSeconds(5);
+        private DateTime _unitCheckAt = DateTime.MinValue;
+        private bool _unitCheckResult;
+        private static readonly TimeSpan UnitCheckTtl = TimeSpan.FromSeconds(3);
 
         public WslBackend(ManagerConfig config)
             : this(config, config == null || config.EffectiveInstances == null || config.EffectiveInstances.Count == 0 ? null : config.EffectiveInstances[0])
@@ -266,7 +275,14 @@ namespace DshWebManager
                 // the service; if the unit itself went away (e.g. the user systemd
                 // manager restarted and dropped it), report dead so the controller
                 // restarts it instead of waiting forever.
-                return WslTools.SystemctlIsActive(_distro, _lastPort);
+                // Throttled: this runs every heartbeat while the service is down
+                // and each call spawns two wsl.exe processes (id -u + systemctl).
+                DateTime now = DateTime.UtcNow;
+                if (now.Subtract(_unitCheckAt) < UnitCheckTtl) return _unitCheckResult;
+                bool alive = WslTools.SystemctlIsActive(_distro, _lastPort);
+                _unitCheckAt = now;
+                _unitCheckResult = alive;
+                return alive;
             }
             try { return _proc != null && !_proc.HasExited; }
             catch { return false; }
@@ -351,13 +367,20 @@ namespace DshWebManager
 
         /// <summary>
         /// Backend-aware liveness: the Windows probe works through localhost forwarding;
-        /// when forwarding is off, fall back to the WSL-side socket table.
+        /// when forwarding is off, fall back to the WSL-side socket table. The WSL-side
+        /// probe spawns a wsl.exe process, so its result is cached for a few seconds
+        /// (the heartbeat calls this every second while the service is down).
         /// </summary>
         public bool IsServiceUp(int port)
         {
             if (PortInspector.IsListening(port)) return true;
             if (String.IsNullOrEmpty(_distro)) return false;
-            return WslTools.WslPortOwnerPid(_distro, port) > 0;
+            DateTime now = DateTime.UtcNow;
+            if (now.Subtract(_wslProbeAt) < WslProbeTtl) return _wslProbeResult;
+            bool up = WslTools.WslPortOwnerPid(_distro, port) > 0;
+            _wslProbeAt = now;
+            _wslProbeResult = up;
+            return up;
         }
 
         /// <summary>

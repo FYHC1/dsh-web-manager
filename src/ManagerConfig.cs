@@ -42,6 +42,12 @@ namespace DshWebManager
         public string DataDir { get; set; }
         public bool CloseStopsService { get; set; }
         public bool ExitKeepService { get; set; }
+        /// <summary>true (default): 关闭实例/退出 stops attached services too - they
+        /// are the instance's own dsh on its configured port. false: attached
+        /// services are only DETACHED (window-only management mode for users who
+        /// run dsh themselves and want the manager to just own the window).
+        /// Nullable so legacy configs (field absent) deserialize to null = true.</summary>
+        public bool? StopAttached { get; set; }
         public bool AutoStart { get; set; }
         public WindowConfig Window { get; set; }
         public string BackendType { get; set; }   // "windows" | "wsl" (v2.1)
@@ -116,6 +122,7 @@ namespace DshWebManager
             DataDir = String.Empty;
             CloseStopsService = false;
             ExitKeepService = false;
+            StopAttached = true;
             AutoStart = false;
             Window = new WindowConfig();
             BackendType = "windows";
@@ -133,7 +140,7 @@ namespace DshWebManager
             ManagerUpdateApi = String.Empty;
             PluginUpdateSpec = String.Empty;
             Profile = "web";
-            Version = "3.4.0";
+            Version = "3.5.0";
             Instances = null; // null = legacy single-instance mode
         }
 
@@ -165,7 +172,8 @@ namespace DshWebManager
                         if (loaded.ManagerUpdateApi == null) loaded.ManagerUpdateApi = String.Empty;
                         if (loaded.PluginUpdateSpec == null) loaded.PluginUpdateSpec = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
-                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.4.0";
+                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.5.0";
+                        if (!loaded.StopAttached.HasValue) loaded.StopAttached = true; // legacy configs default to stop
                         return loaded;
                     }
                 }

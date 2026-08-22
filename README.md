@@ -177,6 +177,7 @@ gh release create v3.0.1 dist/dsh-web-manager.exe --title "dsh web manager v3.0.
 | `DataDir` | Edge 独立浏览器数据目录（留空用默认） | `""` |
 | `CloseStopsService` | 关闭窗口时同时停止服务（旧行为开关） | `false` |
 | `ExitKeepService` | 退出托盘时保留服务 | `false` |
+| `StopAttached` | 「关闭实例/退出」是否停止附着的外部服务；`false` = 纯窗口管理模式（只解除附着） | `true` |
 | `AutoStart` | 开机自启（托盘不弹窗） | `false` |
 | `BackendType` | `windows` / `wsl` | `windows` |
 | `WslPort` | WSL 后端首选端口 | `3080` |

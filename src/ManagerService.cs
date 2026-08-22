@@ -18,6 +18,7 @@ namespace DshWebManager
         private readonly System.Threading.Timer _timer;
         private readonly Dictionary<InstanceController, bool> _hadWindows = new Dictionary<InstanceController, bool>();
         private readonly object _sync = new object();
+        private int _tickRunning;                       // reentrancy guard (Interlocked)
         private DateTime _lastSizeCapture = DateTime.MinValue;
         private DateTime _lastRuntimeRefresh = DateTime.MinValue;
         private bool _disposed;
@@ -859,6 +860,14 @@ namespace DshWebManager
         private void Tick(object state)
         {
             if (_disposed) return;
+            // Reentrancy guard: the timer fires every 1s, but a single Tick can
+            // take longer (WMI queries have a 3s timeout), so the framework may
+            // invoke the callback concurrently on another pool thread. Skipping
+            // the overlapping run keeps the heartbeat, close-detection and size
+            // capture strictly serialized (double Stop/Start of a crashed
+            // service is already prevented by the controller lock, but double
+            // work is pointless and WMI pressure only makes the stall worse).
+            if (Interlocked.CompareExchange(ref _tickRunning, 1, 0) != 0) return;
             try
             {
                 foreach (InstanceController c in Snapshot())
@@ -893,6 +902,10 @@ namespace DshWebManager
             catch (Exception ex)
             {
                 FileLog.Error("Tick failed: " + ex.ToString());
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _tickRunning, 0);
             }
         }
 

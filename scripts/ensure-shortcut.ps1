@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 #  dsh-web-manager: ensure the shared tray manager is installed
 #  and create the platform-specific desktop shortcut.
 #
@@ -20,6 +20,20 @@ param(
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
+# Dotted version comparison for FileVersion strings ("3.5.0.0"); missing segments
+# read as 0. Returns 1 / 0 / -1.
+function Compare-Version([string]$a, [string]$b) {
+    $pa = @($a -split '\.' | ForEach-Object { $n = 0; [void][int]::TryParse($_, [ref]$n); $n })
+    $pb = @($b -split '\.' | ForEach-Object { $n = 0; [void][int]::TryParse($_, [ref]$n); $n })
+    $count = [Math]::Max($pa.Count, $pb.Count)
+    for ($i = 0; $i -lt $count; $i++) {
+        $x = if ($i -lt $pa.Count) { $pa[$i] } else { 0 }
+        $y = if ($i -lt $pb.Count) { $pb[$i] } else { 0 }
+        if ($x -ne $y) { return if ($x -gt $y) { 1 } else { -1 } }
+    }
+    return 0
+}
+
 $desktop = [Environment]::GetFolderPath('Desktop')
 if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE 'Desktop' }
 
@@ -31,6 +45,11 @@ $ico = Join-Path $appRoot 'assets\dsh-webui.ico'
 #    both (win) and (wsl) shortcuts use. Only installed when absent — an existing
 #    manager (possibly the running one, whose exe is locked) is reused as-is; the
 #    user's config/state live under %USERPROFILE%\.dsh-webui and are never touched.
+#    IMPORTANT: never DOWNGRADE the shared install with a stale bundled exe. The
+#    bundle inside an old plugin install (a profile copy from a previous dsh
+#    version) can lag the deployed manager, and restoring it silently regresses
+#    the tray (lost features/fields, e.g. StopAttached). Copy only when absent,
+#    or when the bundled exe is strictly newer.
 $bundled = Join-Path $PSScriptRoot '..\dist\dsh-web-manager.exe'
 if (-not (Test-Path -LiteralPath $bundled -PathType Leaf)) {
     # Not running from a package checkout with a prebuilt dist: fall back to the
@@ -38,7 +57,18 @@ if (-not (Test-Path -LiteralPath $bundled -PathType Leaf)) {
     Write-Host "[ensure-shortcut] bundled exe not found; running Install.ps1 instead"
     & (Join-Path $PSScriptRoot 'Install.ps1') -SkipLaunch
 } elseif (Test-Path -LiteralPath $exe -PathType Leaf) {
-    Write-Host "[ensure-shortcut] reusing shared manager: $exe"
+    $installedVer = (Get-Item -LiteralPath $exe).VersionInfo.FileVersion
+    $bundledVer = (Get-Item -LiteralPath $bundled).VersionInfo.FileVersion
+    if (-not $installedVer -or -not $bundledVer -or (Compare-Version $installedVer $bundledVer) -ge 0) {
+        Write-Host "[ensure-shortcut] reusing shared manager: $exe (v$installedVer)"
+    } else {
+        Write-Host "[ensure-shortcut] upgrading shared manager v$installedVer -> v$bundledVer"
+        try {
+            Copy-Item -LiteralPath $bundled -Destination $exe -Force
+        } catch {
+            Write-Host "[ensure-shortcut] upgrade failed (manager in use?): $($_.Exception.Message)"
+        }
+    }
 } else {
     [System.IO.Directory]::CreateDirectory($appRoot) | Out-Null
     [System.IO.Directory]::CreateDirectory((Join-Path $appRoot 'assets')) | Out-Null

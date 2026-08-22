@@ -517,14 +517,16 @@ namespace DshWebManager
 
         /// <summary>
         /// PID of the Linux process listening on the port inside the distro (0 = none).
-        /// Parses `ss -tlnp` output in C# because inline shell scripts with $(...),
-        /// $VAR or sed back-references get mangled by wsl.exe's argument pass-through.
+        /// Prefers `ss -tlnp`; when ss is missing (minimal distros without iproute2)
+        /// falls back to parsing /proc/net/tcp (+tcp6) and mapping the socket inode
+        /// back to a pid via /proc/&lt;pid&gt;/fd readlinks.
         /// </summary>
         public static int WslPortOwnerPid(string distro, int port)
         {
             if (String.IsNullOrWhiteSpace(distro)) return 0;
             CommandResult r = RunCapture(distro, "ss", new string[] { "-tlnp" }, 15000);
-            if (r.ExitCode != 0) return 0;
+            if (r.ExitCode != 0)
+                return WslPortOwnerPidFromProc(distro, port); // ss unavailable: /proc fallback
             string needle = ":" + port;
             foreach (string raw in (r.StandardOutput ?? String.Empty).Split('\n'))
             {
@@ -539,6 +541,46 @@ namespace DshWebManager
                 if (end > start && int.TryParse(line.Substring(start, end - start), out pid)) return pid;
             }
             return 0;
+        }
+
+        /// <summary>ss-free fallback: /proc/net/tcp(+6) LISTEN rows (st=0A) carry the
+        /// socket inode; the owning pid is the process whose /proc/&lt;pid&gt;/fd/* contains
+        /// a readlink "socket:[&lt;inode&gt;]". Pure bash, no pipes - safe via wsl.exe.</summary>
+        private static int WslPortOwnerPidFromProc(string distro, int port)
+        {
+            try
+            {
+                CommandResult r = RunCapture(distro, "cat", new string[] { "/proc/net/tcp", "/proc/net/tcp6" }, 15000);
+                if (r.ExitCode != 0) return 0;
+                string hexPort = port.ToString("X4");
+                string inode = null;
+                foreach (string raw in (r.StandardOutput ?? String.Empty).Split('\n'))
+                {
+                    string[] f = raw.Trim().Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (f.Length < 10) continue;
+                    if (f[3] != "0A") continue;                       // LISTEN only
+                    string addr = f[1];
+                    int colon = addr.LastIndexOf(':');
+                    if (colon < 0) continue;
+                    if (!addr.Substring(colon + 1).Equals(hexPort, StringComparison.OrdinalIgnoreCase)) continue;
+                    inode = f[9];
+                    break;
+                }
+                if (String.IsNullOrEmpty(inode)) return 0;
+                string script = "for d in /proc/[0-9]*; do for f in $d/fd/*; do "
+                    + "if [ \"$(readlink $f 2>/dev/null)\" = \"socket:[" + inode + "]\" ]; then "
+                    + "echo ${d#/proc/}; exit 0; fi; done; done; exit 1";
+                CommandResult pidR = RunCapture(distro, "bash", new string[] { "-lc", script }, 20000);
+                if (pidR.ExitCode != 0) return 0;
+                int pid;
+                int.TryParse((pidR.StandardOutput ?? String.Empty).Trim(), out pid);
+                return pid;
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("WslPortOwnerPidFromProc: " + ex.Message);
+                return 0;
+            }
         }
 
         /// <summary>True when the Linux process on the port looks like a dsh (node) service.</summary>

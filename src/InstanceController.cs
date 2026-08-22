@@ -221,15 +221,30 @@ namespace DshWebManager
         }
 
         /// <summary>Stops the instance's service. Attached services are stopped
-        /// too: "attached" only means this manager run did not SPAWN the process
-        /// (a systemd-hosted unit, or a service started before a manager restart)
-        /// - it is still the instance's own dsh on its configured port. The old
-        /// detach-only behaviour left the service running and the 5s heartbeat
-        /// re-attached within seconds, so 关闭实例/退出 looked completely inert.</summary>
+        /// too (default): "attached" only means this manager run did not SPAWN the
+        /// process (a systemd-hosted unit, or a service started before a manager
+        /// restart) - it is still the instance's own dsh on its configured port.
+        /// The old detach-only behaviour left the service running and the 5s
+        /// heartbeat re-attached within seconds, so 关闭实例/退出 looked inert.
+        /// Config StopAttached=false restores the detach-only window-management
+        /// mode for users who run dsh themselves.</summary>
         public void Stop(bool force)
         {
             lock (_sync)
             {
+                if (State == InstanceState.Attached && _config.StopAttached != true)
+                {
+                    // Window-only management mode: the external dsh is the user's
+                    // own; just detach (and suppress the re-attach briefly so the
+                    // status does not bounce right back while the user watches).
+                    FileLog.Info("Detaching from attached dsh (StopAttached=false), port " + ActivePort);
+                    State = InstanceState.Stopped;
+                    LastError = null;
+                    _suppressAttachUntil = DateTime.UtcNow.AddSeconds(15);
+                    FireStatus("已解除对外部服务的附着");
+                    _missingCount = 0;
+                    return;
+                }
                 bool active = State == InstanceState.Managed
                     || State == InstanceState.Starting
                     || State == InstanceState.Error
