@@ -754,7 +754,7 @@ while true; do
   log ""launching dsh --profile $PROFILE --host $HOST --port $PORT (bridge=$BRIDGE_PORT)""
   DSH_BRIDGE_PORT=""$BRIDGE_PORT"" DSH_BRIDGE_TOKEN=""$BRIDGE_TOKEN"" \
   DSH_PROFILE=""$PROFILE"" DSH_WEB_PORT=""$PORT"" DSH_WEB_HOST=""$HOST"" \
-  dsh --profile ""$PROFILE"" --host ""$HOST"" --port ""$PORT"" --no-open >> ""$LOG"" 2>&1 &
+  dsh --profile ""$PROFILE"" --host ""$HOST"" --port ""$PORT"" >> ""$LOG"" 2>&1 &
   DSH_PID=$!
   echo ""$DSH_PID"" > ""$PIDFILE""
   wait ""$DSH_PID""
@@ -817,7 +817,7 @@ export DSH_BRIDGE_TOKEN=""$BRIDGE_TOKEN""
 export DSH_PROFILE=""$PROFILE""
 export DSH_WEB_PORT=""$PORT""
 export DSH_WEB_HOST=""$HOST""
-exec dsh --profile ""$PROFILE"" --host ""$HOST"" --port ""$PORT"" --no-open
+exec dsh --profile ""$PROFILE"" --host ""$HOST"" --port ""$PORT""
 ";
 
 
