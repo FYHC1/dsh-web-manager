@@ -216,3 +216,10 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | UUU | Preferences 写入方案 | 启动前改写 `browser.window_placement` + `app_window_placement` | ❌ 窗口仍开 945；Edge 启动时未采用（该键不是 --app 窗口的尺寸来源） |
 | VVV | SetWindowPlacement 直接调用 | 对 Chromium 窗口调用 | ❌ 全新结构体调用返回 error 87；**先 GetWindowPlacement 预填再 Set** 返回 true 但**尺寸改动被 Chromium 忽略**（只取消了最小化）；真正生效的是 SetWindowPos |
 | WWW | 根治方案 | `--start-minimized` 启动 + 出现后「GetWindowPlacement 预填 → SW_HIDE → SetWindowPos 记忆尺寸 → SW_SHOW」 | ✅ 窗口全程不显示错误尺寸，直接以记忆的 1665×1020 出现；关窗重开循环稳定；配置不再被覆盖 |
+
+## 弹出速度优化矩阵 — 2026-08-22 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| XXX | 窗口弹出慢（根因） | 打开后日志时间差 | ❌ Launch → RestoreGeometry 2.55s：校正轮询用 `FindAppWindow`（**2s WMI 快照缓存** + 500ms 间隔），新进程要等缓存刷新才被发现 |
+| YYY | 快速检测 | 改为直接轮询**启动进程**的 `MainWindowHandle`（150ms，无 WMI/无缓存）+ 每 4 次 WMI 兜底（防 re-exec） | ✅ Launch → RestoreGeometry **1.0~1.1s**（Edge 冷启动本身 ~0.8s，检测仅增 ~0.2s）；窗口弹出紧随任务栏按钮；尺寸稳定 1665×1020 |

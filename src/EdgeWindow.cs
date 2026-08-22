@@ -37,8 +37,9 @@ namespace DshWebManager
 
         /// <summary>Launches the Edge app window for the given URL with the
         /// instance's remembered size/position (the per-instance WindowConfig,
-        /// not the manager-level one: multi-instance windows each keep their own).</summary>
-        public static void Launch(string url, int port, string dataDir, WindowConfig window)
+        /// not the manager-level one: multi-instance windows each keep their own).
+        /// Returns the started browser process (for fast window detection).</summary>
+        public static Process Launch(string url, int port, string dataDir, WindowConfig window)
         {
             string edge = FindEdgeExe();
             if (edge == null) throw new InvalidOperationException("Microsoft Edge was not found.");
@@ -80,7 +81,7 @@ namespace DshWebManager
             lock (_launchAt) { _launchAt[port] = DateTime.Now; } // hold CaptureSize off for a while
             ProcessStartInfo psi = new ProcessStartInfo(edge, args);
             psi.UseShellExecute = false;
-            Process.Start(psi);
+            return Process.Start(psi);
         }
 
         /// <summary>Per-port launch timestamps; CaptureSize is held off for a few
@@ -236,29 +237,49 @@ namespace DshWebManager
                 snap.Size = window.Size;
                 snap.Position = window.Position;
             }
-            Launch(url, port, dataDir, window);
-            ScheduleGeometryEnforce(port, snap);
+            Process launched = Launch(url, port, dataDir, window);
+            ScheduleGeometryEnforce(port, snap, launched);
             return true;
         }
 
         /// <summary>Background pass right after a launch: poll for the window to
         /// appear, then restore it at the remembered geometry (the window was
-        /// started minimized so the wrong-size state is never visible). The
-        /// snapshot keeps working even if CaptureSize later overwrites the shared
-        /// WindowConfig with the wrong actual size.</summary>
-        private static void ScheduleGeometryEnforce(int port, WindowConfig snapshot)
+        /// started minimized so the wrong-size state is never visible). Polling
+        /// the launched process's MainWindowHandle is fast (no WMI, no 2s cache),
+        /// so the window is un-minimized within ~150 ms of creation - the earlier
+        /// FindAppWindow polling (2s cache + 500ms interval) made the window pop
+        /// ~2.5s late. The snapshot keeps working even if CaptureSize later
+        /// overwrites the shared WindowConfig with the wrong actual size.</summary>
+        private static void ScheduleGeometryEnforce(int port, WindowConfig snapshot, Process launched)
         {
             System.Threading.ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
                 {
-                    for (int i = 0; i < 20; i++) // up to ~10 s
+                    for (int i = 0; i < 80; i++) // up to ~12 s
                     {
-                        System.Threading.Thread.Sleep(500);
-                        IntPtr h = FindAppWindow(port);
-                        if (h == IntPtr.Zero) continue;
-                        RestoreGeometry(h, snapshot);
-                        break;
+                        System.Threading.Thread.Sleep(150);
+                        IntPtr h = IntPtr.Zero;
+                        if (launched != null)
+                        {
+                            try
+                            {
+                                using (Process p = Process.GetProcessById(launched.Id))
+                                    h = p.MainWindowHandle;
+                            }
+                            catch { } // process exited / re-exec'd
+                        }
+                        if (h == IntPtr.Zero && (i % 4) == 3)
+                        {
+                            // Fallback: fresh WMI snapshot (handles Edge re-exec).
+                            _procCache = null;
+                            h = FindAppWindow(port);
+                        }
+                        if (h != IntPtr.Zero)
+                        {
+                            RestoreGeometry(h, snapshot);
+                            return;
+                        }
                     }
                 }
                 catch (Exception ex) { FileLog.Error("RestoreGeometry pass: " + ex.Message); }
