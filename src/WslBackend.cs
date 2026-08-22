@@ -123,10 +123,13 @@ namespace DshWebManager
         {
             if (!PortInspector.IsListening(port))
             {
-                // Windows cannot see the port; still make sure nothing serves it
-                // inside the distro (localhost forwarding may be off).
+                // Windows cannot see the port (localhost forwarding off). Still check
+                // inside the distro: a running WSL dsh must ATTACH, not be treated as a
+                // port conflict (which would shift the port and relaunch a second dsh).
                 if (!String.IsNullOrEmpty(_distro) && WslTools.WslPortOwnerPid(_distro, port) > 0)
-                    return PortProbeResult.Occupied;
+                    return WslTools.WslPortHasDsh(_distro, port)
+                        ? PortProbeResult.DshServing
+                        : PortProbeResult.Occupied;
                 return PortProbeResult.Free;
             }
             if (IsWrapperAlive()) return PortProbeResult.DshServing;        // our own launch
