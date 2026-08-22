@@ -164,6 +164,11 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
   wsl-systemd-start.sh），浏览器不再冒 dsh 标签，只保留 manager 拉起的独立 `--app` 窗口 ✅ 已修复
 - **默认启动后端**：托盘「默认启动后端」子菜单（Windows 本机 / WSL）决定 manager 以
   `open` 启动时拉起的后端窗口；启动时自动关闭其他实例的残留窗口 ✅ 已交付
+- **默认启动后端勾选指示修复**：根因是 .NET Framework 4.8 的 `ShowCheckMargin` 默认关闭，
+  且子菜单又设了 `ShowImageMargin=false` → 原生勾选符号永远不会绘制，「默认启动后端」与
+  「WSL 服务模式」的当前选中项看起来与未选中完全一样。修复：仅对包含勾选项的子菜单开启
+  `ShowCheckMargin`（原生勾选列），无勾选项的子菜单（实例/更新）保持紧凑；
+  主菜单 256×423 布局、状态项两行高度均不变 ✅ 已修复
 
 ## 许可
 

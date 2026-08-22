@@ -1,4 +1,4 @@
-﻿﻿﻿# 验证矩阵（v2.0 + v2.1 真机实测记录）
+﻿﻿# 验证矩阵（v2.0 + v2.1 真机实测记录）
 
 测试机：Windows 11 22H2 + WSL2（FedoraLinux 运行中 / FedoraLinux44 默认但 Stopped）
 dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm/.../dsh`
@@ -160,3 +160,12 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | XX | FindAppWindow 只匹配独立窗口 | 打开窗口（存在旧无后缀残留窗口时） | ✅ 额外要求 dataDir 带 `-端口"` 后缀，旧共享 profile 残留窗口不再被误匹配恢复 |
 | YY | 默认启动后端 | 「默认启动后端」选 WSL → 重启 manager（open） | ✅ 只 Launch WSL 独立窗口；启动时自动关闭其他实例残留窗口（不再出现 Windows 独立窗口） |
 | ZZ | **浏览器标签根因** | 启动 dsh 实例 | ✅ **dsh web 默认调用系统浏览器打开 URL**（日志 `opening the default browser; pass --no-open to disable`）→ 三处启动命令加 `--no-open` 后，`dsh-web.out.log` 该行 0 次，浏览器不再冒标签，只有独立 `--app` 窗口 |
+
+## 勾选指示修复矩阵 — 2026-08-22 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| AAA | 默认启动后端勾选不可见（根因） | 打开「默认启动后端」子菜单 | ❌ 两个选项无任何区分 → **根因**：.NET 4.8 `ShowCheckMargin` 默认 false + 子菜单 `ShowImageMargin=false` → `PaintCheck=false`，原生勾选永不绘制（WinForms 探针实证：`OnRenderItemCheck` 未被调用） |
+| BBB | 勾选指示修复 | 打开「默认启动后端」子菜单 | ✅ `ShowCheckMargin=true`（仅含勾选项的子菜单）→ 当前默认项显示原生 16×16 勾选（探针实证 `OnRenderItemCheck` 调用 + 像素级确认）；无勾选项的子菜单（实例/更新）不开启，保持紧凑 |
+| CCC | WSL 服务模式勾选 | 打开「WSL 服务模式」子菜单 | ✅ 当前模式（wrapper/systemd）同样显示勾选，与默认后端一致 |
+| DDD | 布局回归检查 | 打开主菜单 + 两个带勾选子菜单 | ✅ 主菜单 256×423、状态项 46px 两行、实例/更新子菜单宽度不变（无空勾选列）；新 exe 反射验证：default/mode 子菜单 `ShowCheckMargin=True`、instances=False |

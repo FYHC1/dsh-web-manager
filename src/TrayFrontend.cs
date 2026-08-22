@@ -342,7 +342,17 @@ namespace DshWebManager
                 if (parent.DropDownItems.Count == 0) return;
                 parent.DropDown.Renderer = _menu.Renderer;
                 ToolStripDropDownMenu dropMenu = parent.DropDown as ToolStripDropDownMenu;
-                if (dropMenu != null) dropMenu.ShowImageMargin = false;
+                if (dropMenu != null)
+                {
+                    dropMenu.ShowImageMargin = false;
+                    // .NET Framework 4.8 ShowCheckMargin defaults to FALSE, and with
+                    // the image margin also off the native check glyph is never
+                    // painted — Checked items looked identical to unchecked ones
+                    // (e.g. the 默认启动后端 / WSL 服务模式 choices). Enable the
+                    // check column only on submenus that actually carry checked
+                    // items, so menus without checks keep their compact layout.
+                    dropMenu.ShowCheckMargin = SubmenuHasCheckedItems(parent);
+                }
                 foreach (ToolStripItem item in parent.DropDownItems)
                 {
                     ToolStripDropDownItem sub = item as ToolStripDropDownItem;
@@ -350,6 +360,17 @@ namespace DshWebManager
                 }
             }
             catch { }
+        }
+
+        /// <summary>True if any direct child can display a check mark (Checked or CheckOnClick).</summary>
+        private static bool SubmenuHasCheckedItems(ToolStripDropDownItem parent)
+        {
+            foreach (ToolStripItem item in parent.DropDownItems)
+            {
+                ToolStripMenuItem mi = item as ToolStripMenuItem;
+                if (mi != null && (mi.CheckOnClick || mi.Checked)) return true;
+            }
+            return false;
         }
 
         public void UpdateStatus(string text)

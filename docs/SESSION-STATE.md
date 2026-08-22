@@ -1,7 +1,7 @@
-﻿﻿﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
+﻿﻿﻿﻿﻿# 会话状态保留（dsh web manager —— 关键上下文）
 
 > 本文件用途：会话压缩/恢复时读取，重建关键事实与未完成事项。
-> 最后更新：2026-08-22 v3.0 P1–P2 全部交付 + 浏览器标签根因修复后
+> 最后更新：2026-08-22 默认启动后端勾选指示修复后
 
 ## 项目现状
 
@@ -21,6 +21,15 @@
   （日志 `opening the default browser; pass --no-open to disable`），这是"关闭后又冒浏览器标签"
   的真正根因——不是 manager 的 Launch。三处启动命令（Windows / wsl-start.sh /
   wsl-systemd-start.sh）已统一加 `--no-open`，验证 `dsh-web.out.log` 该行 0 次。
+- **默认启动后端勾选指示（本次修复）**：用户报告「默认启动后端」子菜单看不出当前默认。
+  根因：**.NET Framework 4.8 的 `ToolStripDropDownMenu.ShowCheckMargin` 默认 false**，
+  且子菜单又设 `ShowImageMargin=false` → `PaintCheck = ShowCheckMargin || ShowImageMargin`
+  为 false，原生勾选符号**永远不会绘制**（Checked 已正确设置但不可见；「开机自启」主菜单项
+  同样受影响）。修复：`ApplySubmenuRenderer` 仅对含勾选项（`Checked || CheckOnClick`）的
+  子菜单开启 `ShowCheckMargin`（24px 原生勾选列），无勾选项的子菜单（实例/更新）保持紧凑；
+  主菜单 256×423 布局与状态项两行高度不变。已用 WinForms 探针在 .NET 4.8 上实证
+  （`ShowCheckMargin=false` 时 `OnRenderItemCheck` 不被调用；`true` 时以 16×16 勾选位图绘制），
+  并对新编译 exe 反射验证：default/mode 子菜单 `ShowCheckMargin=True`、实例子菜单 False。
 
 ## 用户原始诉求（任务栏图标，已闭环）
 
