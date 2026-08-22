@@ -62,9 +62,51 @@ namespace DshWebManager
             }
 
             FileLog.Info("Launching Edge app window: " + args);
+            // Edge startup boost keeps headless processes alive per profile; a
+            // second launch with the same --user-data-dir gets forwarded to them
+            // and the size/position flags are dropped. Kill lingering background
+            // processes for this profile so the new process is fresh and honors
+            // --window-size/--window-position. Only reached when no visible
+            // window exists for the port, so nothing user-visible is interrupted.
+            KillLingeringEdge(dataDir);
+            lock (_launchAt) { _launchAt[port] = DateTime.Now; } // hold CaptureSize off for a while
             ProcessStartInfo psi = new ProcessStartInfo(edge, args);
             psi.UseShellExecute = false;
             Process.Start(psi);
+        }
+
+        /// <summary>Per-port launch timestamps; CaptureSize is held off for a few
+        /// seconds after a launch so a window that opened at the wrong size is
+        /// never captured (that used to clobber the remembered geometry before
+        /// the enforcement pass could correct it).</summary>
+        private static readonly System.Collections.Generic.Dictionary<int, DateTime> _launchAt =
+            new System.Collections.Generic.Dictionary<int, DateTime>();
+        private static readonly TimeSpan CaptureHoldoff = TimeSpan.FromSeconds(6);
+
+        /// <summary>Kills headless/background Edge processes for one dedicated
+        /// profile dir (never windows with a visible main window).</summary>
+        private static void KillLingeringEdge(string dataDir)
+        {
+            try
+            {
+                _procCache = null; // force a fresh process snapshot
+                string needle = dataDir + "\"";
+                foreach (EdgeProcInfo info in GetEdgeProcesses())
+                {
+                    if (info.CommandLine.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    try
+                    {
+                        using (Process p = Process.GetProcessById((int)info.Pid))
+                        {
+                            if (p.MainWindowHandle != IntPtr.Zero) continue; // visible window: never kill
+                            p.Kill();
+                            FileLog.Info("Killed lingering Edge process " + info.Pid + " for " + dataDir);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex) { FileLog.Error("KillLingeringEdge: " + ex.Message); }
         }
 
         /// <summary>One msedge/chrome process snapshot (pid + command line).</summary>
@@ -162,17 +204,100 @@ namespace DshWebManager
             return IntPtr.Zero;
         }
 
-        /// <summary>Brings the app window to front, or launches a new one when absent.</summary>
-        public static void EnsureVisible(WindowConfig window, string dataDir, string url, int port)
+        /// <summary>Brings the app window to front, or launches a new one when absent.
+        /// Returns true when a new window was launched. After a launch, a one-shot
+        /// pass enforces the remembered geometry: Edge may ignore the size/position
+        /// flags (startup-boost forwarding or its own saved placement wins).</summary>
+        public static bool EnsureVisible(WindowConfig window, string dataDir, string url, int port)
         {
             IntPtr h = FindAppWindow(port);
             if (h != IntPtr.Zero)
             {
                 Win32.ShowWindow(h, Win32.SW_RESTORE);
                 Win32.SetForegroundWindow(h);
-                return;
+                return false;
+            }
+            // Snapshot the remembered geometry NOW: the periodic CaptureSize can
+            // overwrite the shared WindowConfig with the (possibly wrong) actual
+            // size within seconds of launch, which would make the enforcement pass
+            // compare against the clobbered value and no-op.
+            WindowConfig snap = null;
+            if (window != null)
+            {
+                snap = new WindowConfig();
+                snap.Size = window.Size;
+                snap.Position = window.Position;
             }
             Launch(url, port, dataDir, window);
+            ScheduleGeometryEnforce(port, snap);
+            return true;
+        }
+
+        /// <summary>Background pass right after a launch: poll for the window to
+        /// appear, then enforce the remembered geometry as soon as it does (Edge
+        /// opens at its own saved placement and ignores the size flags; Chromium
+        /// only persists user-initiated resizes, so this runs on every launch).
+        /// The snapshot keeps working even if CaptureSize later overwrites the
+        /// shared WindowConfig with the wrong actual size.</summary>
+        private static void ScheduleGeometryEnforce(int port, WindowConfig snapshot)
+        {
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    for (int i = 0; i < 20; i++) // up to ~10 s
+                    {
+                        System.Threading.Thread.Sleep(500);
+                        IntPtr h = FindAppWindow(port);
+                        if (h == IntPtr.Zero) continue;
+                        EnforceGeometry(h, snapshot);
+                        break;
+                    }
+                }
+                catch (Exception ex) { FileLog.Error("EnforceGeometry pass: " + ex.Message); }
+            });
+        }
+
+        /// <summary>Applies the remembered size/position when the actual geometry
+        /// differs beyond a small tolerance. Skips minimized/maximized windows.</summary>
+        public static void EnforceGeometry(IntPtr h, WindowConfig window)
+        {
+            if (h == IntPtr.Zero || window == null) return;
+            if (Win32.IsIconic(h) || Win32.IsZoomed(h)) return;
+            int memW, memH;
+            if (!TryParseSize(window.Size, out memW, out memH)) return;
+            int memX, memY;
+            bool hasPos = TryParsePosition(window.Position, out memX, out memY);
+            Win32.RECT r;
+            if (!Win32.GetWindowRect(h, out r)) return;
+            bool needSize = Math.Abs(r.Width - memW) > 25 || Math.Abs(r.Height - memH) > 25;
+            bool needPos = hasPos && (Math.Abs(r.Left - memX) > 25 || Math.Abs(r.Top - memY) > 25);
+            if (!needSize && !needPos) return;
+            int w = needSize ? memW : r.Width;
+            int ht = needSize ? memH : r.Height;
+            int x = needPos ? memX : r.Left;
+            int y = needPos ? memY : r.Top;
+            Win32.SetWindowPos(h, IntPtr.Zero, x, y, w, ht, Win32.SWP_NOACTIVATE | Win32.SWP_NOZORDER);
+            FileLog.Info("EnforceGeometry: applied " + w + "x" + ht + " @" + x + "," + y
+                + " (actual was " + r.Width + "x" + r.Height + " @" + r.Left + "," + r.Top + ")");
+        }
+
+        private static bool TryParseSize(string size, out int w, out int h)
+        {
+            w = h = 0;
+            if (String.IsNullOrEmpty(size)) return false;
+            string[] parts = size.Split('x');
+            return parts.Length == 2
+                && int.TryParse(parts[0], out w) && int.TryParse(parts[1], out h)
+                && w > 100 && h > 100;
+        }
+
+        private static bool TryParsePosition(string pos, out int x, out int y)
+        {
+            x = y = 0;
+            if (String.IsNullOrEmpty(pos)) return false;
+            string[] parts = pos.Split(',');
+            return parts.Length == 2 && int.TryParse(parts[0], out x) && int.TryParse(parts[1], out y);
         }
 
         /// <summary>Closes the app window for the port (WM_CLOSE), if present.</summary>
@@ -275,6 +400,17 @@ namespace DshWebManager
         public static void CaptureSize(int port, WindowConfig window, Action onChanged, DateTime now)
         {
             if (window == null) return;
+            // Right after a launch the window may still be materializing at the
+            // wrong size (Edge saved placement beats the flags); capturing it now
+            // would clobber the remembered geometry. Hold off for a few seconds so
+            // the enforcement pass can correct the window first.
+            lock (_launchAt)
+            {
+                DateTime launched;
+                if (_launchAt.TryGetValue(port, out launched)
+                    && now.Subtract(launched) < CaptureHoldoff)
+                    return;
+            }
             IntPtr h = FindAppWindow(port);
             if (h == IntPtr.Zero) return;
             Win32.RECT r;

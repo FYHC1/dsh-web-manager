@@ -199,3 +199,11 @@ dsh 命令：Windows `C:\nvm4w\nodejs\dsh.cmd`；WSL `/home/hgl/.local/share/fnm
 | NNN | 退出托盘图标残留 | 菜单「退出」 | ✅ 根因：`Environment.Exit` 跳过 Dispose，图标不删 → `Exiting` 事件先 `NotifyIcon.Visible=false`（NIM_DELETE）再退出；覆盖菜单/控制管道/自更新三条退出路径 |
 | OOO | 状态跟随顶部切换 | 点 Windows/WSL 按钮 | ✅ 切换即 `RefreshActiveStatus` 刷新状态项（旧版等下一次 StatusChanged 才更新）；状态只取 ActiveController，无匹配显示「未选择后端」 |
 | PPP | 插件包更新明细 | `updateplugin` | ✅ 气泡/日志含具体包名@版本与来源：`updated dsh-web-manager@1.0.0 in web from file:/home/hgl/projects/dsh/dsh-web-manager` |
+
+## 窗口尺寸记忆深度修复矩阵 — 2026-08-22 实测
+
+| # | 场景 | 操作 | 结果 |
+|---|------|------|------|
+| QQQ | 参数正确但窗口仍错（根因） | 实例级修复后启动参数带 1665x1020 | ❌ 实际窗口仍 945x1020：**Edge 用 Preferences 保存的 `browser.window_placement` 覆盖 `--window-size`**（全新进程也一样，非转发问题）；且 2s 心跳 `CaptureSize` 先把记忆值覆盖成错误实际值（945），3.5s 后的校正拿到被覆盖值 → 空转 |
+| RRR | 快照 + 保持期 + 轮询校正 | 修复后开 WSL 窗口 | ✅ 启动快照记忆值；CaptureSize 保持 6s 不覆盖；轮询到窗口即 `EnforceGeometry`（`SetWindowPos`）：实测 `applied 1665x1020 @130,7 (actual was 945x1020 @130,7)`，窗口 1665x1020；关窗重开再次校正成功；配置保持 1665 不被覆盖 |
+| SSS | Chromium 持久化验证 | 校正后关窗再开 | ✅ 每次打开仍需校正（Chromium 只持久化用户主动调整，外部 SetWindowPos 不写入其 Preferences）→ 校正作为确定性兜底每次启动执行 |

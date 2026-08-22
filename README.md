@@ -257,6 +257,14 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
   而 `CaptureSize` 写入实例级 `Window`，多实例下尺寸永不生效 → 改用实例级窗口配置）；
   ③状态栏严格跟随顶部 Windows/WSL 切换按钮（切换即刷新，只显示所选端，无匹配显示
   「未选择后端」）；④插件包更新提示具体更新的包与来源 ✅ 已交付
+- **v3.1 窗口尺寸记忆深度修复**：实例级配置修复后仍不生效的**真正根因**——Edge 用自己
+  Preferences 里保存的窗口边界（`browser.window_placement`）**覆盖 `--window-size`
+  启动参数**（全新进程也一样），且 Chromium 只持久化用户主动调整、不记录外部
+  `SetWindowPos`。修复：①启动时**快照**记忆几何；②启动后 **CaptureSize 保持 6 秒**
+  不覆盖（否则 2s 心跳先把你记忆的尺寸覆盖成错误实际值，校正就空转了）；
+  ③启动后**轮询**窗口出现即 `SetWindowPos` 强制校正（实测每次打开都能把 945 修正为
+  记忆的 1665×1020，关窗重开依旧）；④启动前清除该 profile 的残留后台进程（Startup
+  Boost 转发会丢参数）✅ 已交付
 
 ## 许可
 
