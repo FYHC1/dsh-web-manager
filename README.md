@@ -40,6 +40,25 @@ Windows 侧常驻托盘的 **DeepSeek Harness WebUI 管理器**：负责启动 d
 
 ## 用法
 
+### 方式一：作为 dsh 插件安装（推荐）
+
+本仓库本身就是一个可安装的 dsh 插件包 **`dsh-web-manager`**（运行时桥 + Windows 托盘
+exe + WSL 伴生脚本打包在一起）。一条命令装入 dsh profile，之后 dsh 每次启动都会自动
+确保托盘 exe 与桌面快捷方式（详见「Runtime Bridge」与「桌面快捷方式与托盘共享」两节）：
+
+```bash
+# 从 GitHub 安装（推荐）
+dsh plugin --profile web add github:FYHC1/dsh-web-manager
+# 或从本地仓库安装（开发/离线场景）
+dsh plugin --profile web add file:/path/to/dsh-web-manager
+```
+
+装完**重启 dsh**（重新运行 `dsh web`）即生效：托盘随 dsh 常驻；桌面上自动出现
+`DeepSeek Harness WebUI (win)/(wsl).lnk` 快捷方式与 WSL 端 `dsh-webui` 命令，
+双击/执行即可快速打开独立窗口。
+
+### 方式二：Windows 手动安装（不装插件）
+
 Windows PowerShell：
 
 ```powershell
@@ -117,7 +136,7 @@ powershell -ExecutionPolicy Bypass -File scripts\Install.ps1
 `ping` / `getStatus` / `getRuntimeInfo` / `shutdown`，请求形如
 `{"v":1,"method":"getRuntimeInfo","token":"<BridgeToken>"}`。
 
-**安装**（WSL 与 Windows 两侧 profile 各自执行一次）：
+**安装**（命令同「用法 · 方式一」；WSL 与 Windows 两侧 profile 各自执行一次）：
 
 ```bash
 # 从本地仓库安装
