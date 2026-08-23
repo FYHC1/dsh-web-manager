@@ -41,7 +41,7 @@ Uninstallable=yes
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "zh"; MessagesFile: "innosetup\ChineseSimplified.isl"
 
 [Messages]
 zh.WelcomeLabel2=这将把离线一体化包（便携 Node + dsh + 预烘焙 profile + dsh web manager 托盘）安装到您的电脑。%n%n继续之前请关闭其他应用程序。
