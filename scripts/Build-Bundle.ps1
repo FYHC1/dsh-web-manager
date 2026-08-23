@@ -104,7 +104,22 @@ if (-not $SkipDsh) {
     # never need a global pnpm (clean CI runners have none; exit 127 otherwise).
     & $nodeExe $npmCli install -g pnpm --no-audit --no-fund --loglevel=error --registry=https://registry.npmmirror.com
     if ($LASTEXITCODE -ne 0) { throw "pnpm install failed with exit code $LASTEXITCODE." }
-    Write-Host "[bundle] pnpm $(& (Join-Path $nodeDir 'pnpm.cmd') --version) bundled into the portable node"
+    # npm's shim placement varies by prefix config; locate the package and make
+    # sure a RELOCATABLE pnpm.cmd sits beside node.exe (the bake prepends this
+    # dir to PATH, and the bundle tree gets copied to the target machine).
+    $pnpmCjs = Join-Path $nodeDir 'node_modules\pnpm\bin\pnpm.cjs'
+    if (-not (Test-Path -LiteralPath $pnpmCjs -PathType Leaf)) {
+        $gRoot = ((& $nodeExe $npmCli root -g | Out-String).Trim() -split "`r?`n")[0]
+        $pnpmCjs = Join-Path $gRoot 'pnpm\bin\pnpm.cjs'
+    }
+    if (-not (Test-Path -LiteralPath $pnpmCjs -PathType Leaf)) { throw "pnpm package not found after install." }
+    $pnpmShim = Join-Path $nodeDir 'pnpm.cmd'
+    if (-not (Test-Path -LiteralPath $pnpmShim -PathType Leaf)) {
+        $rel = $pnpmCjs.Substring($nodeDir.Length + 1)
+        [System.IO.File]::WriteAllText($pnpmShim,
+            "@echo off`r`n`"%~dp0node.exe`" `"%~dp0$rel`" %*`r`n", (New-Object System.Text.ASCIIEncoding))
+    }
+    Write-Host "[bundle] pnpm $(& $nodeExe $pnpmCjs --version) bundled into the portable node (shim: $pnpmShim)"
 }
 
 # ---------- 3. Manager dist ----------
