@@ -1,4 +1,4 @@
-# dsh web manager
+# dsh webui desktop
 
 Windows 侧常驻托盘的 **DeepSeek Harness WebUI 管理器**：负责启动 dsh web、拉起 Edge 应用窗口、守护服务进程、常驻系统托盘，并接管窗口图标与窗口尺寸记忆。
 
