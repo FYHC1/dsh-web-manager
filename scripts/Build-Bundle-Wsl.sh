@@ -55,7 +55,7 @@ command -v tar  >/dev/null || die "tar is required"
 command -v xz   >/dev/null || die "xz is required"
 
 # ---------- 1. Portable Node (linux-x64) ----------
-mkdir -p "$OUTDIR"
+mkdir -p "$OUTDIR" "$BUNDLE"
 NODE_DIR="$BUNDLE/node"
 rm -rf "$NODE_DIR"
 TARBALL="node-v$NODE_VERSION-linux-x64.tar.xz"
