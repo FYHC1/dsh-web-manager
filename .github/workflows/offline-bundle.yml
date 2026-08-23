@@ -95,6 +95,18 @@ jobs:
         shell: powershell
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
+      - name: Stage bundle at a short path for ISCC
+        # Inno Setup cannot open source files with paths > MAX_PATH (260 chars).
+        # The npm/pnpm trees go deeper than that under the repo checkout, so Inno
+        # aborts with "cannot find the path specified" on the first file past the
+        # limit. Copy the bundle to a short root (pwsh handles long paths) so every
+        # source path stays under 260. Verified locally: 270-char path fails,
+        # 228-char path compiles.
+        shell: powershell
+        run: |
+          if (Test-Path D:\bundle) { Remove-Item D:\bundle -Recurse -Force }
+          Copy-Item -Path "bundle-out\dsh-offline-bundle\*" -Destination "D:\bundle" -Recurse
+          if (-not (Test-Path D:\bundle\bundle.json)) { throw "bundle staging failed" }
       - name: Compile setup EXE
         shell: pwsh
         run: |
@@ -102,9 +114,8 @@ jobs:
           $mv = ($ver -split '\.')[0..2] -join '.'
           $tag = "${{ github.ref_name }}"
           if (-not $tag) { $tag = "ci" }
-          $bundleAbs = (Resolve-Path bundle-out\dsh-offline-bundle).Path
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
-            "/DBundleDir=$bundleAbs" `
+            "/DBundleDir=D:\bundle" `
             "/DMyVersion=$mv" "/DPayloadTag=$tag" `
             ".\packaging\windows-installer.iss"
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
