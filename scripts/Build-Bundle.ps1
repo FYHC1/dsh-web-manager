@@ -102,7 +102,7 @@ if (-not $SkipDsh) {
     # dsh's `plugin` subcommand shells out to pnpm found on PATH. Ship pnpm
     # inside the portable node so the bake (and the offline target machine)
     # never need a global pnpm (clean CI runners have none; exit 127 otherwise).
-    & $nodeExe $npmCli install -g pnpm --no-audit --no-fund --loglevel=error --registry=https://registry.npmmirror.com
+    & $nodeExe $npmCli install -g pnpm --prefix $nodeDir --no-audit --no-fund --loglevel=error --registry=https://registry.npmmirror.com
     if ($LASTEXITCODE -ne 0) { throw "pnpm install failed with exit code $LASTEXITCODE." }
     # npm's shim placement varies by prefix config; locate the package and make
     # sure a RELOCATABLE pnpm.cmd sits beside node.exe (the bake prepends this
@@ -115,9 +115,16 @@ if (-not $SkipDsh) {
     if (-not (Test-Path -LiteralPath $pnpmCjs -PathType Leaf)) { throw "pnpm package not found after install." }
     $pnpmShim = Join-Path $nodeDir 'pnpm.cmd'
     if (-not (Test-Path -LiteralPath $pnpmShim -PathType Leaf)) {
-        $rel = $pnpmCjs.Substring($nodeDir.Length + 1)
-        [System.IO.File]::WriteAllText($pnpmShim,
-            "@echo off`r`n`"%~dp0node.exe`" `"%~dp0$rel`" %*`r`n", (New-Object System.Text.ASCIIEncoding))
+        if ($pnpmCjs.StartsWith($nodeDir)) {
+            # Relocatable: survives the bundle being copied to target machines.
+            $rel = $pnpmCjs.Substring($nodeDir.Length + 1)
+            [System.IO.File]::WriteAllText($pnpmShim,
+                "@echo off`r`n`"%~dp0node.exe`" `"%~dp0$rel`" %*`r`n", (New-Object System.Text.ASCIIEncoding))
+        } else {
+            # pnpm landed outside the portable node dir; absolute shim still works.
+            [System.IO.File]::WriteAllText($pnpmShim,
+                "@echo off`r`n`"$nodeExe`" `"$pnpmCjs`" %*`r`n", (New-Object System.Text.ASCIIEncoding))
+        }
     }
     Write-Host "[bundle] pnpm $(& $nodeExe $pnpmCjs --version) bundled into the portable node (shim: $pnpmShim)"
 }

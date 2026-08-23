@@ -106,6 +106,7 @@ log "dsh $(node -e "console.log(require('$DSH_PKG_JSON').version)") packaged"
 # the portable node so the bake — and the offline target machine — never need a
 # global pnpm (a clean CI runner has none; exit 127 otherwise).
 "$NODE_BIN" "$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js" install -g pnpm \
+  --prefix "$NODE_DIR" \
   --no-audit --no-fund --loglevel=error --registry=https://registry.npmmirror.com
 log "pnpm $("$NODE_DIR/bin/pnpm" --version) bundled into the portable node"
 

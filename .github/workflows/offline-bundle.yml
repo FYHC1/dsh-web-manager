@@ -88,7 +88,9 @@ jobs:
           $ver = (Get-Content bundle-out\dsh-offline-bundle\bundle.json -Raw | ConvertFrom-Json).BundleVersion
           $tag = "${{ github.ref_name }}"
           if (-not $tag) { $tag = "ci" }
-          Compress-Archive -Path bundle-out\dsh-offline-bundle\* -DestinationPath "bundle-out\dsh-offline-bundle-$ver-$tag.zip"
+          # 7z handles the ~1GB tree reliably (Compress-Archive can OOM at this size)
+          7z a -tzip "bundle-out\dsh-offline-bundle-$ver-$tag.zip" "bundle-out\dsh-offline-bundle\*" | Out-Null
+          if (-not $?) { throw "7z zip failed" }
           "BUNDLE_ZIP=dsh-offline-bundle-$ver-$tag.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
         shell: powershell
       - name: Install Inno Setup
