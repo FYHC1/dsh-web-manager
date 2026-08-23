@@ -140,7 +140,7 @@ namespace DshWebManager
             ManagerUpdateApi = String.Empty;
             PluginUpdateSpec = String.Empty;
             Profile = "web";
-            Version = "3.5.1";
+            Version = "3.6.0";
             Instances = null; // null = legacy single-instance mode
         }
 
@@ -172,7 +172,7 @@ namespace DshWebManager
                         if (loaded.ManagerUpdateApi == null) loaded.ManagerUpdateApi = String.Empty;
                         if (loaded.PluginUpdateSpec == null) loaded.PluginUpdateSpec = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
-                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.5.1";
+                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.6.0";
                         if (!loaded.StopAttached.HasValue) loaded.StopAttached = true; // legacy configs default to stop
                         return loaded;
                     }

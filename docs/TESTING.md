@@ -346,3 +346,24 @@ WinEventHook（CREATE..SHOW，无 DLL 注入）；目标进程集合 = 该端口
 | JJJJ2 | L4: RefreshRuntime 10s 节流非原子 | 已被 M1 的 Tick 重入守卫串行化覆盖，无需改码 |
 | KKKK2 | L5: FileLog 每次调用开/关文件 | 常驻 StreamWriter（AutoFlush），滚动时重建；失败自动失效重开 |
 | LLLL2 | L6: IsListening 仅 IPv4 回环 | 增加 `::1` 探测（IPv6/双栈监听不再漏检）；WSL 无转发仍由 WslPortOwnerPid 兜底 |
+
+## 按需启动 + 快捷方式自动配置实例 — 2026-08-23 (v3.6)
+
+用户反馈：① 用 `open wsl` 快捷方式只打开 WSL 窗口，但 Windows 端 dsh 也被启动；
+② 删除 Windows 实例后 `open windows` 报"未找到后端"——快捷方式必须预配实例才能用。
+
+**根因**：`Initialize` 里 `foreach c.Start()` 无差别启动全部实例（任意快捷方式都会
+拉起另一端）；`OpenBackendWindow` 找不到后端控制器直接报错，不会自动创建。
+
+**修复**：
+- `Initialize` 不再批量启动：`open windows`/`open wsl`/`open` 只走对应后端的窗口路径
+  （`OpenWindow` 内部对 Stopped 实例惰性 `Start`）；`tray`（登录/自启）不启动任何服务，
+  已运行的服务经心跳附着（如 systemd 单元 5s 内显示运行中）。
+- 快捷方式按需**自动配置实例**：后端无控制器时 `GetOrCreateControllerForBackend` 按
+  后端记忆端口（下一空闲端口）生成默认实例（Id=windows/wsl，profile/mode/distro 取共享
+  配置）并经 `AddInstance` 持久化，随后正常打开窗口。
+
+| # | 验证 | 结果 |
+|---|------|------|
+| MMMM2 | `open wsl` 不启动 Windows | ✅ 先关闭 Windows 实例（3081 空闲）→ `open wsl` → WSL 窗口打开、3081 保持空闲 |
+| NNNN2 | 删除 Windows 实例后 `open windows` | ✅ 自动生成 windows 实例（config 回写）+ 服务启动 + 窗口打开，无"未找到后端" |

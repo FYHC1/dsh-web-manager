@@ -90,7 +90,13 @@ namespace DshWebManager
         {
             _config.MigrateLegacyWindowSize();
             _config.Save();
-            foreach (InstanceController c in _controllers) c.Start();
+            // Start ONLY what this launch needs. The old blanket
+            // foreach c.Start() made ANY shortcut (e.g. open wsl) also boot every
+            // other instance - the user saw the Windows dsh start when they only
+            // asked for the WSL side. Services now come up when their window is
+            // opened (OpenWindow starts a Stopped instance); already-running ones
+            // attach via the heartbeat. A plain "tray" start (login/autostart)
+            // launches nothing by itself.
             if (String.Equals(action, "open windows", StringComparison.OrdinalIgnoreCase))
                 OpenBackendWindow("windows");
             else if (String.Equals(action, "open wsl", StringComparison.OrdinalIgnoreCase))
@@ -198,7 +204,7 @@ namespace DshWebManager
         /// <summary>Opens the window of the configured default-start backend.</summary>
         public void OpenDefaultBackendWindow()
         {
-            InstanceController c = GetControllerForBackend(_config.DefaultBackend);
+            InstanceController c = GetOrCreateControllerForBackend(_config.DefaultBackend);
             if (c == null) return;
             int index = _controllers.IndexOf(c);
             OpenWindow(index >= 0 ? index : 0);
@@ -220,10 +226,87 @@ namespace DshWebManager
             return null;
         }
 
+        /// <summary>Controller for a backend; when the backend has NO instance at
+        /// all (removed, or the manager was never configured for it), provisions a
+        /// default instance on the fly so the desktop shortcuts work on first use -
+        /// no manual 添加实例 step required. The window opening still does the
+        /// lazy service start (OpenWindow -> c.Start()).</summary>
+        private InstanceController GetOrCreateControllerForBackend(string backend)
+        {
+            InstanceController c = GetControllerForBackend(backend);
+            if (c != null) return c;
+            InstanceConfig inst = BuildDefaultInstance(backend);
+            if (inst == null)
+            {
+                FileLog.Error("Could not auto-provision an instance for backend " + backend);
+                return null;
+            }
+            AddInstance(inst); // persists, creates the controller, starts async
+            return GetControllerForBackend(backend);
+        }
+
+        /// <summary>A sensible default instance for a backend that has none:
+        /// remembered backend port (next free one), profile/mode/distro from the
+        /// shared config, a unique id. Returned config is NOT yet persisted.</summary>
+        private InstanceConfig BuildDefaultInstance(string backend)
+        {
+            bool wsl = String.Equals(backend, "wsl", StringComparison.OrdinalIgnoreCase);
+            InstanceConfig inst = new InstanceConfig();
+            inst.Id = UniqueInstanceId(wsl ? "wsl" : "windows");
+            if (inst.Id == null) return null;
+            inst.Profile = String.IsNullOrWhiteSpace(_config.Profile) ? "web" : _config.Profile;
+            inst.BackendType = backend;
+            inst.Enabled = true;
+            inst.Window = new WindowConfig();
+            int basePort = wsl ? _config.WslPort : _config.Port;
+            if (basePort <= 0) basePort = 3080;
+            int port = NextFreePort(basePort);
+            if (port <= 0) return null;
+            inst.Port = port;
+            inst.WslPort = port;
+            inst.WslDistro = _config.WslDistro;
+            inst.WslServiceMode = String.IsNullOrWhiteSpace(_config.WslServiceMode) ? "wrapper" : _config.WslServiceMode;
+            FileLog.Info("Auto-provisioned " + backend + " instance: id=" + inst.Id + ", port=" + port);
+            return inst;
+        }
+
+        private string UniqueInstanceId(string baseId)
+        {
+            if (_config.Instances == null) return baseId;
+            if (!IdExists(baseId)) return baseId;
+            for (int n = 2; n < 20; n++)
+            {
+                string candidate = baseId + "-" + n;
+                if (!IdExists(candidate)) return candidate;
+            }
+            return null;
+        }
+
+        private bool IdExists(string id)
+        {
+            if (_config.Instances == null) return false;
+            foreach (InstanceConfig e in _config.Instances)
+                if (String.Equals(e.Id, id, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        /// <summary>Next port >= basePort that no existing instance uses.</summary>
+        private int NextFreePort(int basePort)
+        {
+            for (int p = basePort; p < basePort + 100; p++)
+            {
+                bool used = false;
+                foreach (InstanceConfig e in _config.EffectiveInstances)
+                    if (e.EffectivePort == p) { used = true; break; }
+                if (!used) return p;
+            }
+            return -1;
+        }
+
         /// <summary>Opens the window of one specific backend ("windows" / "wsl").</summary>
         public void OpenBackendWindow(string backend)
         {
-            InstanceController c = GetControllerForBackend(backend);
+            InstanceController c = GetOrCreateControllerForBackend(backend);
             if (c == null)
             {
                 Balloon("dsh web manager", "未找到后端: " + backend);
