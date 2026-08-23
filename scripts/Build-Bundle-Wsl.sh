@@ -102,6 +102,13 @@ DSH_PKG_JSON="$DSH_DIR/@deepseek-ai/dsh/package.json"
 [ -f "$DSH_PKG_JSON" ] || die "dsh package.json missing in tree"
 log "dsh $(node -e "console.log(require('$DSH_PKG_JSON').version)") packaged"
 
+# dsh's `plugin` subcommand shells out to pnpm found on PATH. Ship pnpm inside
+# the portable node so the bake — and the offline target machine — never need a
+# global pnpm (a clean CI runner has none; exit 127 otherwise).
+"$NODE_BIN" "$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js" install -g pnpm \
+  --no-audit --no-fund --loglevel=error --registry=https://registry.npmmirror.com
+log "pnpm $("$NODE_DIR/bin/pnpm" --version) bundled into the portable node"
+
 # ---------- 3. Companion scripts ----------
 mkdir -p "$BUNDLE/wsl-scripts"
 cp -f "$REPO_ROOT"/scripts/wsl/*.sh "$BUNDLE/wsl-scripts/" 2>/dev/null || log "WARNING: no scripts/wsl/*.sh found"
@@ -126,6 +133,7 @@ run_dsh() {  # $1 = 0|1 offline, rest = dsh args; stdout/stderr -> bake logs
     env_prefix=(env)
   fi
   ( cd "$BAKE_HOME" && "${env_prefix[@]}" \
+      PATH="$NODE_DIR/bin:$PATH" \
       HOME="$BAKE_HOME" \
       XDG_DATA_HOME="$BAKE_HOME/.local/share" \
       XDG_CACHE_HOME="$BAKE_HOME/.cache" \

@@ -98,6 +98,13 @@ if (-not $SkipDsh) {
     Remove-Item -LiteralPath $stage -Recurse -Force
     $dshPkg = Get-Content -LiteralPath (Join-Path $dshDir '@deepseek-ai\dsh\package.json') -Raw | ConvertFrom-Json
     Write-Host "[bundle] dsh $($dshPkg.version) packaged (bin: $($dshPkg.bin | ConvertTo-Json -Compress))"
+
+    # dsh's `plugin` subcommand shells out to pnpm found on PATH. Ship pnpm
+    # inside the portable node so the bake (and the offline target machine)
+    # never need a global pnpm (clean CI runners have none; exit 127 otherwise).
+    & $nodeExe $npmCli install -g pnpm --no-audit --no-fund --loglevel=error --registry=https://registry.npmmirror.com
+    if ($LASTEXITCODE -ne 0) { throw "pnpm install failed with exit code $LASTEXITCODE." }
+    Write-Host "[bundle] pnpm $(& (Join-Path $nodeDir 'pnpm.cmd') --version) bundled into the portable node"
 }
 
 # ---------- 3. Manager dist ----------
@@ -144,6 +151,9 @@ if (-not $SkipProfile) {
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
         $psi.WorkingDirectory = $bakeHome
+        # Portable node FIRST on PATH: the bundled pnpm (dsh's plugin subcommand
+        # needs it) and a consistent node for any child process.
+        $psi.EnvironmentVariables['Path'] = "$nodeDir;" + $psi.EnvironmentVariables['Path']
         $psi.EnvironmentVariables['USERPROFILE'] = $bakeHome
         $psi.EnvironmentVariables['HOME'] = $bakeHome
         $psi.EnvironmentVariables['APPDATA'] = "$bakeHome\AppData\Roaming"
