@@ -34,7 +34,10 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
-OutputDir=..\bundle-out
+; OutputDir is resolved against the ISCC CURRENT DIRECTORY (not the .iss file),
+; so pin it to the .iss location — otherwise a run from the repo root writes
+; outside the repo and dies with "cannot find the path".
+OutputDir={#SourcePath}..\bundle-out
 OutputBaseFilename=dsh-offline-bundle-setup_{#MyVersion}_x64_{#PayloadTag}
 UninstallDisplayName=dsh offline bundle {#MyVersion}
 Uninstallable=yes
