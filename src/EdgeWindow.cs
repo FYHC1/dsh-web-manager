@@ -24,33 +24,50 @@ namespace DshWebManager
         private static DateTime _procCacheAt = DateTime.MinValue;
         private static readonly TimeSpan ProcCacheTtl = TimeSpan.FromSeconds(2);
 
-        public static string FindEdgeExe()
+        /// <summary>Resolves the Chromium-family browser used for the standalone
+        /// app window: Microsoft Edge first, then Google Chrome, then the
+        /// open-source Chromium build. All three speak the same --app/
+        /// --user-data-dir window protocol and use the Chrome_WidgetWin_1 frame
+        /// class, so launch, lookup, icon and geometry handling are identical.
+        /// Returns null when none is installed.</summary>
+        public static string FindBrowserExe()
         {
             string pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
             string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string lAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             List<string> candidates = new List<string>();
+            // 1. Microsoft Edge
             if (!String.IsNullOrEmpty(pf86)) candidates.Add(Path.Combine(pf86, "Microsoft", "Edge", "Application", "msedge.exe"));
             if (!String.IsNullOrEmpty(pf)) candidates.Add(Path.Combine(pf, "Microsoft", "Edge", "Application", "msedge.exe"));
+            // 2. Google Chrome (per-machine and per-user installs)
+            if (!String.IsNullOrEmpty(pf)) candidates.Add(Path.Combine(pf, "Google", "Chrome", "Application", "chrome.exe"));
+            if (!String.IsNullOrEmpty(pf86)) candidates.Add(Path.Combine(pf86, "Google", "Chrome", "Application", "chrome.exe"));
+            if (!String.IsNullOrEmpty(lAppData)) candidates.Add(Path.Combine(lAppData, "Google", "Chrome", "Application", "chrome.exe"));
+            // 3. Open-source Chromium build
+            if (!String.IsNullOrEmpty(lAppData)) candidates.Add(Path.Combine(lAppData, "Chromium", "Application", "chrome.exe"));
+            if (!String.IsNullOrEmpty(pf)) candidates.Add(Path.Combine(pf, "Chromium", "Application", "chrome.exe"));
             foreach (string c in candidates)
                 if (File.Exists(c)) return c;
             return null;
         }
 
-        /// <summary>Launches the Edge app window for the given URL with the
+        /// <summary>Launches the browser app window for the given URL with the
         /// instance's remembered size/position (the per-instance WindowConfig,
         /// not the manager-level one: multi-instance windows each keep their own).
+        /// Uses Edge when present, otherwise falls back to Chrome/Chromium.
         /// Returns the started browser process (for fast window detection).</summary>
         public static Process Launch(string url, int port, string dataDir, WindowConfig window)
         {
-            string edge = FindEdgeExe();
-            if (edge == null) throw new InvalidOperationException("Microsoft Edge was not found.");
+            string browser = FindBrowserExe();
+            if (browser == null)
+                throw new InvalidOperationException("未找到可用的浏览器：需要 Microsoft Edge、Google Chrome 或 Chromium 之一");
 
             // A dedicated, isolated browser profile is REQUIRED: without it Edge
             // merges the --app request into the default profile's running instance
             // (single-instance semantics), the app window never becomes a standalone
             // window, and the manager can neither find it nor set its taskbar icon.
             // Each instance gets its own profile dir (suffixed by port) so multiple
-            // app windows never merge into one Edge/browser window.
+            // app windows never merge into one browser window.
             if (String.IsNullOrEmpty(dataDir))
                 dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-web-manager-browser");
             dataDir = dataDir + "-" + port;
@@ -70,9 +87,9 @@ namespace DshWebManager
                     args += " --window-position=" + window.Position;
             }
 
-            FileLog.Info("Launching Edge app window: " + args);
-            // Do NOT kill lingering Edge background processes: after a window
-            // close, Edge startup boost keeps a warm process for the profile.
+            FileLog.Info("Launching browser app window [" + Path.GetFileName(browser) + "]: " + args);
+            // Do NOT kill lingering browser background processes: after a window
+            // close, startup boost keeps a warm process for the profile.
             // Forwarding to it makes the next open nearly instant (a cold start
             // with this profile's extensions takes ~1s+). The size no longer
             // depends on the command line (the geometry hook sizes the hidden
@@ -80,12 +97,12 @@ namespace DshWebManager
             // WMI fallback in the enforcement poll finds the window created by
             // the existing process.
             lock (_launchAt) { _launchAt[port] = DateTime.Now; } // hold CaptureSize off for a while
-            ProcessStartInfo psi = new ProcessStartInfo(edge, args);
+            ProcessStartInfo psi = new ProcessStartInfo(browser, args);
             psi.UseShellExecute = false;
             return Process.Start(psi);
         }
 
-        /// <summary>Starts an idle, window-less Edge process for the profile so the
+        /// <summary>Starts an idle, window-less browser process for the profile so the
         /// NEXT open forwards to a warm browser instead of a slower reload of the
         /// profile state (extensions/session - measured ~600ms extra on reopen).
         /// No-op when a process for the profile already exists. Called when an app
@@ -106,13 +123,13 @@ namespace DshWebManager
                     if (info.CommandLine.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
                         return; // already warm (visible window or preheated)
                 }
-                string edge = FindEdgeExe();
-                if (edge == null) return;
-                ProcessStartInfo psi = new ProcessStartInfo(edge,
+                string browser = FindBrowserExe();
+                if (browser == null) return;
+                ProcessStartInfo psi = new ProcessStartInfo(browser,
                     "--user-data-dir=\"" + dataDir + "\" --no-startup-window");
                 psi.UseShellExecute = false;
                 Process.Start(psi);
-                FileLog.Info("Preheat: started warm Edge for " + dataDir);
+                FileLog.Info("Preheat: started warm browser [" + Path.GetFileName(browser) + "] for " + dataDir);
             }
             catch (Exception ex) { FileLog.Error("Preheat: " + ex.Message); }
         }

@@ -367,3 +367,12 @@ WinEventHook（CREATE..SHOW，无 DLL 注入）；目标进程集合 = 该端口
 |---|------|------|
 | MMMM2 | `open wsl` 不启动 Windows | ✅ 先关闭 Windows 实例（3081 空闲）→ `open wsl` → WSL 窗口打开、3081 保持空闲 |
 | NNNN2 | 删除 Windows 实例后 `open windows` | ✅ 自动生成 windows 实例（config 回写）+ 服务启动 + 窗口打开，无"未找到后端" |
+
+## 浏览器回退：无 Edge 时用 Chrome / Chromium — 2026-08-23 (v3.7)
+
+| # | 检查项 | 结果 |
+|---|------|------|
+| NNNN2 | 原 `FindEdgeExe` 是否支持 Chrome/Chromium | ❌ 只查 Edge（Program Files 两处 msedge.exe），找不到即抛错，无任何回退 |
+| OOOO2 | 窗口查找（FindAppWindow/WMI）是否兼容 | ✅ 本就匹配 `msedge.exe OR chrome.exe`（Chromium 进程名同为 chrome.exe），按 profile 目录匹配，天然兼容 |
+| PPPP2 | 修复 | `FindEdgeExe` → `FindBrowserExe`：Edge（2 处）→ Chrome（Program Files/Program Files(x86)/LocalAppData 3 处）→ Chromium（LocalAppData/Program Files 2 处）依次探测；`Launch`/`Preheat` 共用，日志标注实际浏览器名；错误信息改为中文提示三选一 |
+| QQQQ2 | 实测 | 本机 Edge 存在 → 启动窗口日志 `Launching browser app window [msedge.exe]`，几何钩子/图标/尺寸全部正常 |

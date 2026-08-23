@@ -23,6 +23,9 @@ Windows 侧常驻托盘的 **DeepSeek Harness WebUI 管理器**：负责启动 d
   从第一帧起就是记忆尺寸、全程零跳变（Edge 本身只认自己的默认 945×1020，`--window-size`/
   `--start-minimized`/Preferences 全部无效，排除法矩阵见 docs/TESTING.md）；
 - **快速唤起**：关窗后预热驻留热进程，重开窗口 ~0.7–1.1s；无 URL 门控，窗口立即打开；
+- **浏览器回退（v3.7）**：默认使用 Edge；本机未安装 Edge 时自动改用 **Google Chrome**，
+  再不行用开源 **Chromium**（三者同为 Chromium 内核，`--app` 独立窗口、几何钩子、
+  图标与隔离 profile 行为完全一致）；
 - **窗口只是视图**：关窗不停服务，托盘/快捷方式随时一键重新唤起。
 
 ## 快速打开窗口
