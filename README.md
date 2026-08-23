@@ -231,6 +231,8 @@ gh release create v3.0.1 dist/dsh-web-manager.exe --title "dsh web manager v3.0.
 | --- | --- | --- |
 | `Port` | Windows 后端首选端口 | `3080` |
 | `AutoFallback` | 非 dsh 占用时自动顺延空闲端口 | `true` |
+| `WindowBackend` | v3.8 窗口后端：`auto`（有 WebView2 运行时即内嵌，否则 Edge）/ `webview2`（强制内嵌，缺失时回退并气泡提示）/ `edge`（原 Edge `--app` 路径） | `auto` |
+| `DshCommand` | dsh 命令绝对路径覆盖（离线包用；留空走 PATH/常见布局探测） | `""` |
 | `DataDir` | Edge 独立浏览器数据目录（留空用默认） | `""` |
 | `CloseStopsService` | 关闭窗口时同时停止服务（旧行为开关） | `false` |
 | `ExitKeepService` | 退出托盘时保留服务 | `false` |
@@ -274,6 +276,10 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 
 ## 里程碑
 
+- **v3.8**：WebView2 内嵌窗口后端（窗口归属管理器进程，任务栏鲸鱼图标不受
+  「合并任务栏按钮」影响；`WindowBackend` 配置 + 运行时缺失自动回退 Edge）+
+  离线安装包 `dsh-offline-bundle`（Build-Bundle / Install-Offline / Uninstall-Offline，
+  便携 Node + dsh 包树 + 预烘焙 profile，断网首启验收）+ `DshCommand` 配置直连 ✅ 已交付
 - **v2.0**：Windows 后端全量——托盘、窗口、图标、尺寸、守护、配置、日志、迁移、A–I 验证
 - **v2.1**：WSL 后端（wsl-start.sh 自愈托管 + distro 自动探测 + attached/managed 所有权 +
   双向互装 bootstrap + 每后端端口记忆）✅ 已交付，J–Q 真机矩阵通过
@@ -330,19 +336,108 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 MIT
 ## 任务栏图标说明（Windows）
 
-窗口图标由管理器通过 `WM_SETICON` 持续设置（32/16px，官方 `DeepSeek Harness.ico`），
-验证方式：`WM_GETICON` 像素采样与官方图标一致。
+**v3.8 起，默认窗口后端为 WebView2 内嵌窗口**：WebUI 窗口直接属于管理器进程
+（`WebViewForm`，每个实例一个 STA UI 线程），任务栏按钮的图标与分组都跟随管理器
+自带的鲸鱼图标——即使任务栏开启「合并任务栏按钮」也不会被 Edge 进程图标顶掉。
+每实例窗口仍写入独立 AUMID（`DeepSeekHarness.WebUI.<port>`，对自有窗口
+`SHGetPropertyStoreForWindow` 正常生效），多实例不会互相合并。
 
-**注意**：若任务栏启用了「合并任务栏按钮」（TaskbarGlomLevel 0/1，Win10 生效），
-多个同进程窗口（如 Edge 的多个 `--app` 窗口）会被合并成单个按钮并显示**进程图标
-（Edge）**，即使每个窗口自身的图标都是 DeepSeek 鲸鱼。
+- 需要WebView2 运行时（Win11 / 新 Win10 已内置；缺失时管理器自动回退 Edge 模式并气泡提示）。
+- 构建 WebView2 后端需要 `lib\` 下的 SDK 程序集，首次执行
+  `powershell -ExecutionPolicy Bypass -File lib\Get-WebView2.ps1` 自动下载解包。
+- 强制走旧路径：`config.json` 里 `"WindowBackend": "edge"`。
 
-要使 DSH 窗口在任务栏显示鲸鱼图标，请将任务栏设置为「从不合并」：
+**Edge 模式的旧限制（回退时生效）**：窗口图标由管理器通过 `WM_SETICON` 持续设置
+（32/16px，官方 `DeepSeek Harness.ico`），验证方式：`WM_GETICON` 像素采样与官方图标一致。
+但若任务栏启用了「合并任务栏按钮」（TaskbarGlomLevel 0/1，Win10 生效），多个同进程窗口
+（如 Edge 的多个 `--app` 窗口）会被合并成单个按钮并显示**进程图标（Edge）**，即使每个窗口
+自身的图标都是 DeepSeek 鲸鱼。Edge 模式下要显示鲸鱼图标，请将任务栏设置为「从不合并」：
 - 设置 → 个性化 → 任务栏 → 「合并任务栏按钮」→「从不合并」
 - 或注册表：`HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced` 下
   `TaskbarGlomLevel = 2`，然后重启资源管理器（explorer）生效。
 
-> 为什么不通过 AUMID 在代码层解决？Chromium 的 `--app` 窗口在 Windows 上
+> 为什么 Edge 模式无法在代码层解决？Chromium 的 `--app` 窗口在 Windows 上
 > 不接受外部进程写入窗口 AppUserModelID（`SHGetPropertyStoreForWindow` 的
 > `SetValue` 对 Chromium 窗口抛 `0x80070002`，普通窗口正常）。AUMID 由页面
-> manifest 决定，外部无法覆盖。
+> manifest 决定，外部无法覆盖。这正是 v3.8 引入 WebView2 内嵌窗口的原因：
+> 窗口归属管理器进程后，图标/分组问题从根上消失。
+
+## 离线安装包（dsh-offline-bundle）
+
+为无外网（或仅内网）的 Windows x64 目标机准备的一体化离线发行包：
+便携 Node（官方 win-x64 zip）+ `@deepseek-ai/dsh` npm 包树 + 预烘焙的 `~/.dsh`
+profile（已装本管理器插件）+ 管理器 dist。目标机一条命令完成安装，首次启动不联网。
+
+```powershell
+# 构建端（联网的 Windows 机器，仓库根目录）：
+powershell -ExecutionPolicy Bypass -File scripts\Build-Bundle.ps1
+#   产出 bundle-out\dsh-offline-bundle\（node\ dsh\ profile-web\ dsh-web-manager\
+#   + Install-Offline.ps1 + Uninstall-Offline.ps1 + bundle.json）
+#   profile 烘焙有硬性验收：断网（死代理）启动通过才打包，否则直接失败不出包。
+
+# 目标端（离线机器，解压后在该目录执行）：
+powershell -ExecutionPolicy Bypass -File Install-Offline.ps1              # 默认：装齐 + 启动托盘
+powershell -ExecutionPolicy Bypass -File Install-Offline.ps1 -AutoStart   # 另加开机自启
+powershell -ExecutionPolicy Bypass -File Uninstall-Offline.ps1            # 卸载（默认保留 ~/.dsh）
+powershell -ExecutionPolicy Bypass -File Uninstall-Offline.ps1 -PurgeProfile  # 连 profile 一起删
+```
+
+行为要点：
+
+- 安装位置：`%LOCALAPPDATA%\dsh-bundle\`（node + dsh 包树 + `bin\dsh.cmd` shim，
+  shim 用绝对路径指向捆绑 node，不依赖全局 Node/npm）；管理器照常装到
+  `%LOCALAPPDATA%\dsh-web-manager\app`，并写入 `config.json` 的 `DshCommand`
+  直连捆绑 shim（PATH 仅作为补充，可用 `-NoPath` 跳过）。
+- profile：拷贝预烘焙的 `~/.dsh`；已存在时只补缺文件，**绝不覆盖**
+  `.credentials.yaml`（API Key 留占位，在 WebUI 里填）。
+- WebView2 运行时缺失不阻塞安装：管理器自动回退 Edge 窗口模式（见上）。
+- 幂等升级：重跑新版 `Install-Offline.ps1` 即升级（robocopy 镜像 + 管理器版本比较
+  不降级 + 配置保留）；离线机的升级 = 拿新版 bundle 重跑安装器。
+- `bundle.json` 记录各组件版本，供日志与升级比对（样例见仓库根 `bundle.example.json`）。
+- 测试：两个脚本都识别 `DSH_WEB_MANAGER_HOME` 沙箱（管理器文件、profile、共享配置
+  全部落沙箱，不碰真实用户环境；见 TESTING.md 纪律）。
+
+### WSL 侧（bundle\wsl\ 载荷 + deb 包）
+
+离线包可以内嵌 WSL 载荷（Linux 版便携 Node + dsh 树 + 预烘焙的 Linux `~/.dsh` profile，
+构建时同样过断网启动验收门）：
+
+```bash
+# 构建端（Linux 机器 / CI ubuntu runner / 任意 WSL 发行版内）：
+bash scripts/Build-Bundle-Wsl.sh                 # -> bundle-out/bundle-wsl/
+# Windows 侧构建时合入：
+powershell -File scripts\Build-Bundle.ps1 -WslPayloadDir bundle-out\bundle-wsl
+# 目标机：Install-Offline.ps1 检测到 bundle\wsl\ + wsl.exe 即自动装 WSL 侧
+#   （发行版自动探测：优先运行中的非辅助发行版；-WslDistro 显式指定，-SkipWsl 跳过）
+```
+
+WSL 侧落地内容（发行版内 `~/.dsh-bundle/` + `~/.local/bin/dsh` + profile 补缺 +
+`~/.dsh-webui/` 伴生脚本），由 `scripts/wsl/install-wsl.sh` 完成——它同时是 deb/rpm 包的
+post 脚本核心。**两种 Linux 包都带 `-wsl` 后缀**（`dsh-bundle-wsl`），与未来适配裸机
+Linux 的 `dsh-bundle`（原生包）区分：
+
+```bash
+# deb（Debian/Ubuntu 系 WSL 发行版）：
+bash scripts/Build-Deb.sh --payload bundle-out/bundle-wsl   # -> dsh-bundle-wsl_<ver>_amd64.deb
+sudo apt install ./dsh-bundle-wsl_*_amd64.deb               # /opt/dsh-bundle-wsl + postinst 接线默认用户
+dsh-bundle-wsl-install                                      # 任意用户重跑用户级安装
+
+# rpm（Fedora 系 WSL 发行版，本机即此场景；需 rpm-build）：
+bash scripts/Build-Rpm.sh --payload bundle-out/bundle-wsl   # -> dsh-bundle-wsl-<ver>-1.x86_64.rpm
+sudo dnf install ./dsh-bundle-wsl-*.rpm                     # 同样 %post 接线默认用户
+```
+
+### CI：GitHub Actions 一键出安装包
+
+`.github/workflows/offline-bundle.yml`：打 tag（`v*`）触发（也可手动 dispatch）。
+
+- **wsl-payload**（ubuntu）：`Build-Bundle-Wsl.sh` 出 WSL 载荷；随后 **deb**（同 job，
+  `dsh-bundle-wsl_<ver>_amd64.deb`）与 **rpm**（fedora 容器 job，
+  `dsh-bundle-wsl-<ver>-1.x86_64.rpm`）分别打包
+- **windows-installer**（windows）：下载载荷合入 bundle → `Build-Bundle.ps1` → Inno Setup
+  编译出**单文件 setup EXE**（`dsh-offline-bundle-setup_<ver>_x64_<tag>.exe`，内嵌全部载荷，
+  安装完自动跑 `Install-Offline.ps1 -WithWsl`，卸载走 `Uninstall-Offline.ps1`）
+- **release**：tag 推送时自动发布 GitHub Release（exe + deb + rpm + bundle zip）
+
+本地也能出 EXE：装 [Inno Setup 6](https://jrsoftware.org/isinfo.php) 后
+`ISCC /DBundleDir=..\bundle-out\dsh-offline-bundle /DMyVersion=3.8.0 packaging\windows-installer.iss`。

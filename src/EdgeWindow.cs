@@ -12,6 +12,23 @@ namespace DshWebManager
     /// </summary>
     public static class EdgeWindow
     {
+        /// <summary>Window backend in use: "edge" (default, external browser --app)
+        /// or "webview2" (in-process embedded window). All public entry points
+        /// dispatch to WebViewWindow when webview2 is active; the Edge machinery
+        /// below is the fallback and stays untouched.</summary>
+        private static string _mode = "edge";
+
+        public static string Mode
+        {
+            get { return _mode; }
+            set { _mode = String.IsNullOrEmpty(value) ? "edge" : value; }
+        }
+
+        private static bool IsWebView2Mode
+        {
+            get { return String.Equals(_mode, "webview2", StringComparison.OrdinalIgnoreCase); }
+        }
+
         private static IntPtr _bigIcon;
         private static IntPtr _smallIcon;
         private static string _iconSource = String.Empty;
@@ -69,7 +86,7 @@ namespace DshWebManager
             // Each instance gets its own profile dir (suffixed by port) so multiple
             // app windows never merge into one browser window.
             if (String.IsNullOrEmpty(dataDir))
-                dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-web-manager-browser");
+                dataDir = Path.Combine(AppPaths.LocalAppData, "dsh-web-manager-browser");
             dataDir = dataDir + "-" + port;
             string args = "--app=" + url + " --user-data-dir=\"" + dataDir + "\"";
             // Edge 150 IGNORES --window-size (verified: fresh profile with
@@ -110,10 +127,11 @@ namespace DshWebManager
         /// reopens. The relaxed FindAppWindow matches the forwarded window.</summary>
         public static void Preheat(int port, string dataDir)
         {
+            if (IsWebView2Mode) { WebViewWindow.Preheat(port, dataDir); return; }
             try
             {
                 if (String.IsNullOrEmpty(dataDir))
-                    dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dsh-web-manager-browser");
+                    dataDir = Path.Combine(AppPaths.LocalAppData, "dsh-web-manager-browser");
                 dataDir = dataDir + "-" + port;
                 string needle = "-" + port + "\"";
                 _procCache = null;
@@ -203,6 +221,7 @@ namespace DshWebManager
         /// </summary>
         public static IntPtr FindAppWindow(int port)
         {
+            if (IsWebView2Mode) return WebViewWindow.FindAppWindow(port);
             try
             {
                 // Only match windows whose user-data-dir carries the per-port suffix
@@ -247,6 +266,7 @@ namespace DshWebManager
         /// before the SHOW), with a polling enforcement pass as fallback.</summary>
         public static bool EnsureVisible(WindowConfig window, string dataDir, string url, int port)
         {
+            if (IsWebView2Mode) return WebViewWindow.EnsureVisible(window, dataDir, url, port);
             IntPtr h = FindAppWindow(port);
             if (h != IntPtr.Zero)
             {
@@ -540,6 +560,7 @@ namespace DshWebManager
         /// the hide/resize/show sequence so the wrong size is never displayed.</summary>
         public static void RestoreGeometry(IntPtr h, WindowConfig window)
         {
+            if (IsWebView2Mode) { WebViewWindow.RestoreGeometry(h, window); return; }
             if (h == IntPtr.Zero) return;
             int memW = 0, memH = 0, memX = 0, memY = 0;
             bool hasSize = window != null && TryParseSize(window.Size, out memW, out memH);
@@ -589,7 +610,7 @@ namespace DshWebManager
             FileLog.Info("RestoreGeometry: applied " + pw + "x" + ph + " @" + px + "," + py);
         }
 
-        private static bool TryParseSize(string size, out int w, out int h)
+        public static bool TryParseSize(string size, out int w, out int h)
         {
             w = h = 0;
             if (String.IsNullOrEmpty(size)) return false;
@@ -599,7 +620,7 @@ namespace DshWebManager
                 && w > 100 && h > 100;
         }
 
-        private static bool TryParsePosition(string pos, out int x, out int y)
+        public static bool TryParsePosition(string pos, out int x, out int y)
         {
             x = y = 0;
             if (String.IsNullOrEmpty(pos)) return false;
@@ -610,6 +631,7 @@ namespace DshWebManager
         /// <summary>Closes the app window for the port (WM_CLOSE), if present.</summary>
         public static void CloseWindow(int port)
         {
+            if (IsWebView2Mode) { WebViewWindow.CloseWindow(port); return; }
             try
             {
                 IntPtr h = FindAppWindow(port);
@@ -631,6 +653,7 @@ namespace DshWebManager
         /// them and re-apply every tick.</summary>
         public static void ApplyIconToWindow(int port)
         {
+            if (IsWebView2Mode) { WebViewWindow.ApplyIconToWindow(port); return; }
             IntPtr h = FindAppWindow(port);
             if (h == IntPtr.Zero) return;
             IntPtr last;
@@ -710,6 +733,7 @@ namespace DshWebManager
         /// </summary>
         public static void CaptureSize(int port, WindowConfig window, Action onChanged, DateTime now)
         {
+            if (IsWebView2Mode) { WebViewWindow.CaptureSize(port, window, onChanged, now); return; }
             if (window == null) return;
             // Right after a launch the window may still be materializing at the
             // wrong size (Edge saved placement beats the flags); capturing it now

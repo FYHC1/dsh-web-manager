@@ -4,6 +4,7 @@
   "DataDir": "",
   "CloseStopsService": false,
   "ExitKeepService": false,
+  "StopAttached": true,
   "AutoStart": false,
   "Window": {
     "Size": "",
@@ -14,5 +15,7 @@
   "WslDistro": "",
   "WslServiceMode": "wrapper",
   "Profile": "web",
-  "Version": "2.1.0"
+  "Version": "3.8.0",
+  "WindowBackend": "auto",
+  "DshCommand": ""
 }

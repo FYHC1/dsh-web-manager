@@ -90,6 +90,10 @@ namespace DshWebManager
         {
             _config.MigrateLegacyWindowSize();
             _config.Save();
+            // Offline-bundle pin: launch the bundled dsh directly instead of a
+            // PATH lookup (no-op when DshCommand is empty).
+            DshLauncher.DshCommandOverride = _config.DshCommand;
+            ResolveWindowBackend();
             // Start ONLY what this launch needs. The old blanket
             // foreach c.Start() made ANY shortcut (e.g. open wsl) also boot every
             // other instance - the user saw the Windows dsh start when they only
@@ -106,6 +110,40 @@ namespace DshWebManager
             _timer.Change(0, 1000);
             // v3.0: throttled dsh update check in the background (24 h).
             ThreadPool.QueueUserWorkItem(_ => CheckForUpdates());
+        }
+
+        /// <summary>Resolves config.WindowBackend into EdgeWindow.Mode:
+        /// "edge" / "webview2" explicitly, "auto" probes the WebView2 Runtime and
+        /// falls back to edge when absent (or when the managed DLLs are missing).</summary>
+        private void ResolveWindowBackend()
+        {
+            string requested = String.IsNullOrWhiteSpace(_config.WindowBackend)
+                ? "auto" : _config.WindowBackend.Trim().ToLowerInvariant();
+            if (requested == "edge")
+            {
+                EdgeWindow.Mode = "edge";
+                FileLog.Info("WindowBackend: edge (explicit)");
+                return;
+            }
+            bool available = WebViewWindow.IsRuntimeAvailable();
+            if (requested == "webview2")
+            {
+                if (available)
+                {
+                    EdgeWindow.Mode = "webview2";
+                    FileLog.Info("WindowBackend: webview2 (explicit)");
+                }
+                else
+                {
+                    EdgeWindow.Mode = "edge";
+                    FileLog.Info("WindowBackend: webview2 requested but runtime missing; falling back to edge");
+                    var b = Balloon; if (b != null) b("dsh web manager", "WebView2 Runtime 不可用，已回退 Edge 窗口模式");
+                }
+                return;
+            }
+            // auto
+            EdgeWindow.Mode = available ? "webview2" : "edge";
+            FileLog.Info("WindowBackend: " + EdgeWindow.Mode + " (auto)");
         }
 
         private void OnControllerStatus(string text)

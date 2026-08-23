@@ -1,0 +1,30 @@
+{
+  "BundleVersion": "1.0.0",
+  "CreatedAt": "2026-01-01T00:00:00Z",
+  "Node": {
+    "Version": "v24.19.0",
+    "Arch": "win-x64",
+    "Source": "node/ (portable win-x64 zip; node.exe + npm for offline npx-style use)"
+  },
+  "Dsh": {
+    "Package": "@deepseek-ai/dsh",
+    "Version": "0.0.0",
+    "Entry": "dist/cli.mjs",
+    "Source": "dsh/ (hoisted node_modules tree; install resolves this bin entry)"
+  },
+  "Profile": {
+    "Name": "web",
+    "Source": "profile-web/",
+    "OfflineStartVerified": true,
+    "Note": "pre-baked ~/.dsh: profiles/web + settings; .credentials.yaml never overwritten on install"
+  },
+  "Manager": {
+    "Version": "3.8.0.0",
+    "Source": "dsh-web-manager/ (repo dist: exe + WebView2 DLLs + Install.ps1)"
+  },
+  "Layout": {
+    "Install-Offline.ps1": "target-machine installer (offline)",
+    "Uninstall-Offline.ps1": "uninstaller",
+    "bundle.json": "this manifest (written by scripts/Build-Bundle.ps1)"
+  }
+}

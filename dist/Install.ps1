@@ -21,9 +21,11 @@ if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
 }
 
 # 1. Install application files.
+# (Explicit enumeration: Copy-Item -LiteralPath '<dir>\*' is a silent no-op on
+# PS 5.1 — LiteralPath does not expand wildcards and does not error either.)
 $installRoot = Join-Path $env:LOCALAPPDATA 'dsh-web-manager\app'
 [System.IO.Directory]::CreateDirectory($installRoot) | Out-Null
-Copy-Item -LiteralPath (Join-Path $SourceDir '*') -Destination $installRoot -Recurse -Force
+Get-ChildItem -LiteralPath $SourceDir -Force | Copy-Item -Destination $installRoot -Recurse -Force
 Write-Host "Installed app files to $installRoot"
 
 # 2. Shared config (visible from WSL as /mnt/c/Users/<user>/.dsh-webui/).
@@ -49,7 +51,7 @@ if (-not (Test-Path -LiteralPath $iconDest -PathType Leaf)) {
 #    so the WSL-side wsl-bootstrap.sh can reinstall the manager if it goes missing.
 $bootstrapDir = Join-Path $sharedDir 'wsl-bootstrap'
 [System.IO.Directory]::CreateDirectory($bootstrapDir) | Out-Null
-Copy-Item -LiteralPath (Join-Path $SourceDir '*') -Destination $bootstrapDir -Recurse -Force
+Get-ChildItem -LiteralPath $SourceDir -Force | Copy-Item -Destination $bootstrapDir -Recurse -Force
 Write-Host "Mirrored installer to $bootstrapDir (for WSL-side bootstrap)"
 
 # 5. v2.1 WSL companion: materialize wsl-start.sh / wsl-bootstrap.sh into the default

@@ -9,9 +9,18 @@ namespace DshWebManager
     /// <summary>Resolves and launches the `dsh` CLI (hidden) and kills process trees.</summary>
     public static class DshLauncher
     {
+        /// <summary>Absolute path to the dsh CLI entry (dsh.cmd/dsh.exe), set from
+        /// config.DshCommand by ManagerService. Empty = resolve via PATH / known
+        /// layouts. Lets the offline bundle pin the bundled dsh instead of a
+        /// global install.</summary>
+        public static string DshCommandOverride { get; set; }
+
         public static string FindDshCommand()
         {
             List<string> candidates = new List<string>();
+            // 0. Config override (offline bundle): exact file, highest priority.
+            string ov = DshCommandOverride;
+            if (!String.IsNullOrEmpty(ov)) candidates.Add(ov);
             // 1. Resolve via PATH ("dsh.cmd" from nvm-windows / npm global).
             string fromPath = Which("dsh.cmd");
             if (fromPath != null) candidates.Add(fromPath);

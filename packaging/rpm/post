@@ -1,0 +1,20 @@
+# dsh-bundle-wsl RPM %post: wire the payload (unpacked at
+# /opt/dsh-bundle-wsl) into the default WSL user's environment.
+# (Runs as root with /bin/sh on Fedora; POSIX-safe.)
+PAYLOAD=/opt/dsh-bundle-wsl
+
+# Default WSL user: /etc/wsl.conf [user] default, else the first UID>=1000.
+DEFUSER=$(awk -F= '/^\[user\]/{u=1} u && /^default=/{gsub(/[" ]/,"",$2); print $2; exit}' /etc/wsl.conf 2>/dev/null)
+if [ -z "$DEFUSER" ]; then
+  DEFUSER=$(awk -F: '$3>=1000 && $3<65534 {print $1; exit}' /etc/passwd)
+fi
+if [ -z "$DEFUSER" ]; then
+  echo "dsh-bundle-wsl: no regular user found; run manually:" >&2
+  echo "  $PAYLOAD/install-wsl.sh --src $PAYLOAD --prefix \$HOME/.dsh-bundle" >&2
+  exit 0
+fi
+
+echo "dsh-bundle-wsl: installing user-level pieces for '$DEFUSER'"
+"$PAYLOAD/install-wsl.sh" --src "$PAYLOAD" --prefix "$PAYLOAD" --skip-tree --user "$DEFUSER"
+
+echo "dsh-bundle-wsl: done. Try: dsh --version   (in a new login shell)"

@@ -66,6 +66,14 @@ namespace DshWebManager
         public string PluginUpdateSpec { get; set; }    // plugin bundle install spec override ("" = auto-detect; v3.1)
         public string Profile { get; set; }        // dsh profile name (default web)
         public string Version { get; set; }
+        /// <summary>Window backend: "auto" (webview2 when the runtime is present,
+        /// else edge), "edge" (external browser --app window) or "webview2"
+        /// (in-process embedded window). Empty/absent = "auto" (v3.8).</summary>
+        public string WindowBackend { get; set; }
+        /// <summary>Absolute path to the dsh CLI entry (dsh.cmd/dsh.exe) override;
+        /// empty = resolve via PATH / known layouts. Used by the offline bundle
+        /// install so the manager launches the bundled dsh directly (v3.8).</summary>
+        public string DshCommand { get; set; }
 
         /// <summary>v3.0 multi-instance list; empty falls back to the legacy single
         /// instance fields (migration view in EffectiveInstances).</summary>
@@ -140,7 +148,9 @@ namespace DshWebManager
             ManagerUpdateApi = String.Empty;
             PluginUpdateSpec = String.Empty;
             Profile = "web";
-            Version = "3.7.0";
+            Version = "3.8.0";
+            WindowBackend = "auto";
+            DshCommand = String.Empty;
             Instances = null; // null = legacy single-instance mode
         }
 
@@ -172,7 +182,9 @@ namespace DshWebManager
                         if (loaded.ManagerUpdateApi == null) loaded.ManagerUpdateApi = String.Empty;
                         if (loaded.PluginUpdateSpec == null) loaded.PluginUpdateSpec = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
-                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.7.0";
+                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.8.0";
+                        if (String.IsNullOrEmpty(loaded.WindowBackend)) loaded.WindowBackend = "auto";
+                        if (loaded.DshCommand == null) loaded.DshCommand = String.Empty;
                         if (!loaded.StopAttached.HasValue) loaded.StopAttached = true; // legacy configs default to stop
                         return loaded;
                     }

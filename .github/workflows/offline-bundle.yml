@@ -1,0 +1,136 @@
+name: offline-bundle
+
+# Builds the offline installers:
+#   wsl payload (linux)  -> bundle-wsl/ artifact
+#   windows setup EXE    -> dsh-offline-bundle-setup_<ver>_x64_<tag>.exe
+#   wsl deb              -> dsh-bundle_<ver>_amd64.deb
+#   bundle zip           -> dsh-offline-bundle-<ver>-<tag>.zip
+# A tag push (v*) also publishes a GitHub Release with all artifacts.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dsh-version:
+        description: 'dsh npm version spec'
+        default: 'latest'
+      node-version:
+        description: 'portable Node version'
+        default: '24.19.0'
+
+permissions:
+  contents: write
+
+jobs:
+  wsl-payload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build WSL payload
+        run: |
+          bash scripts/Build-Bundle-Wsl.sh \
+            --node-version "${{ inputs.node-version || '24.19.0' }}" \
+            --dsh-version "${{ inputs.dsh-version || 'latest' }}"
+      - name: Upload payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-wsl
+          path: bundle-out/bundle-wsl/
+      - name: Build deb
+        run: bash scripts/Build-Deb.sh --payload bundle-out/bundle-wsl
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsl-deb
+          path: bundle-out/dsh-bundle-wsl_*_amd64.deb
+
+  rpm:
+    needs: wsl-payload
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - run: dnf install -y git tar rpm-build grep
+      - uses: actions/checkout@v4
+      - name: Download WSL payload
+        uses: actions/download-artifact@v4
+        with:
+          name: bundle-wsl
+          path: bundle-out/bundle-wsl
+      - name: Build rpm
+        run: bash scripts/Build-Rpm.sh --payload bundle-out/bundle-wsl
+      - name: Upload rpm
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsl-rpm
+          path: bundle-out/dsh-bundle-wsl-*.rpm
+
+  windows-installer:
+    needs: wsl-payload
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download WSL payload
+        uses: actions/download-artifact@v4
+        with:
+          name: bundle-wsl
+          path: bundle-out/bundle-wsl
+      - name: Fetch WebView2 SDK assemblies
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File lib\Get-WebView2.ps1
+      - name: Build manager dist + assemble bundle (merge WSL payload)
+        run: >
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build-Bundle.ps1
+          -NodeVersion "${{ inputs.node-version || '24.19.0' }}"
+          -DshVersion "${{ inputs.dsh-version || 'latest' }}"
+          -WslPayloadDir "bundle-out\bundle-wsl"
+      - name: Zip the raw bundle
+        run: |
+          $ver = (Get-Content bundle-out\dsh-offline-bundle\bundle.json -Raw | ConvertFrom-Json).BundleVersion
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag) { $tag = "ci" }
+          Compress-Archive -Path bundle-out\dsh-offline-bundle\* -DestinationPath "bundle-out\dsh-offline-bundle-$ver-$tag.zip"
+          "BUNDLE_ZIP=dsh-offline-bundle-$ver-$tag.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+        shell: powershell
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Compile setup EXE
+        shell: pwsh
+        run: |
+          $ver = (Get-Content bundle-out\dsh-offline-bundle\bundle.json -Raw | ConvertFrom-Json).Manager.Version
+          $mv = ($ver -split '\.')[0..2] -join '.'
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag) { $tag = "ci" }
+          $bundleAbs = (Resolve-Path bundle-out\dsh-offline-bundle).Path
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DBundleDir=$bundleAbs" `
+            "/DMyVersion=$mv" "/DPayloadTag=$tag" `
+            ".\packaging\windows-installer.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+      - name: Upload setup EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-setup
+          path: bundle-out/dsh-offline-bundle-setup_*.exe
+      - name: Upload bundle zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-zip
+          path: bundle-out/*.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [wsl-payload, windows-installer, rpm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" --generate-notes \
+            artifacts/wsl-deb/*.deb \
+            artifacts/wsl-rpm/*.rpm \
+            artifacts/windows-setup/*.exe \
+            artifacts/bundle-zip/*.zip

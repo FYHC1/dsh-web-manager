@@ -44,6 +44,9 @@ namespace DshWebManager
 
         public const uint SWP_NOZORDER = 0x0004;
         public const uint SWP_NOACTIVATE = 0x0010;
+        public const uint SWP_NOMOVE = 0x0002;
+        public const uint SWP_NOSIZE = 0x0001;
+        public const uint SWP_FRAMECHANGED = 0x0020;
 
         public const int SW_HIDE = 0;
         public const int SW_SHOWNORMAL = 1;
@@ -215,5 +218,14 @@ namespace DshWebManager
         public const uint QS_ALLINPUT = 0x04FF;
         public const uint WAIT_OBJECT_0 = 0x0000;
         public const uint WAIT_TIMEOUT = 0x0102;
+
+        // ---- DWM window attributes (title bar theming) ----
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+        public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;   // 19 on pre-2004 Win10
+        public const int DWMWA_USE_IMMERSIVE_DARK_MODE_LEGACY = 19;
+        public const int DWMWA_CAPTION_COLOR = 35;              // Win11 22000+: exact title bar color
+        public const int DWMWA_TEXT_COLOR = 36;                 // Win11 22000+: title text color
     }
 }

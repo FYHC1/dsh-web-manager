@@ -8,6 +8,12 @@ dist/*
 !dist/Install.ps1
 !dist/Uninstall.ps1
 !dist/wsl/
+# v3.8: WebView2 backend runtime layout (needed beside the EXE).
+!dist/Microsoft.Web.WebView2.Core.dll
+!dist/Microsoft.Web.WebView2.WinForms.dll
+!dist/WebView2Loader.dll
+!dist/x64/
+!dist/x86/
 
 # Local data
 *.user
@@ -18,3 +24,5 @@ dist/*
 Thumbs.db
 Desktop.ini
 .DS_Store
+# offline bundle build output (Build-Bundle*.ps1/sh)
+bundle-out/

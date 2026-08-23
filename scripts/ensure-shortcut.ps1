@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  dsh-web-manager: ensure the shared tray manager is installed
 #  and create the platform-specific desktop shortcut.
 #
@@ -78,6 +78,21 @@ if (-not (Test-Path -LiteralPath $bundled -PathType Leaf)) {
             $src = Join-Path $PSScriptRoot "..\dist\$asset"
             if (Test-Path -LiteralPath $src -PathType Leaf) {
                 Copy-Item -LiteralPath $src -Destination (Join-Path $appRoot $asset) -Force
+            }
+        }
+        # v3.8: WebView2 runtime files (managed assemblies + native loader) must
+        # follow the exe, otherwise the embedded window backend cannot start.
+        foreach ($rel in @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll')) {
+            $src = Join-Path $PSScriptRoot "..\dist\$rel"
+            if (Test-Path -LiteralPath $src -PathType Leaf) {
+                Copy-Item -LiteralPath $src -Destination (Join-Path $appRoot $rel) -Force
+            }
+        }
+        foreach ($arch in @('x64', 'x86')) {
+            $srcDir = Join-Path $PSScriptRoot "..\dist\$arch"
+            if (Test-Path -LiteralPath $srcDir -PathType Directory) {
+                [System.IO.Directory]::CreateDirectory((Join-Path $appRoot $arch)) | Out-Null
+                Get-ChildItem -LiteralPath $srcDir -File | Copy-Item -Destination (Join-Path $appRoot $arch) -Force
             }
         }
         Write-Host "[ensure-shortcut] installed shared manager to $appRoot"
