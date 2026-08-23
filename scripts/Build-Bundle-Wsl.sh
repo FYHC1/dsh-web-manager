@@ -85,6 +85,9 @@ DSH_DIR="$BUNDLE/dsh"
 rm -rf "$DSH_DIR"
 STAGE="$OUTDIR/dsh-linux-stage"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
+# A package.json HERE is required: npm walks up to the nearest one and would
+# otherwise install into the repo root (which owns the manager plugin package).
+echo '{"name":"dsh-bundle-stage","private":true}' > "$STAGE/package.json"
 log "npm install @deepseek-ai/dsh@$DSH_VERSION (npmmirror, global-style)"
 (
   cd "$STAGE"

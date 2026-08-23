@@ -81,9 +81,12 @@ if (-not $SkipDsh) {
     $stage = Join-Path $OutDir 'dsh-stage'
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     [System.IO.Directory]::CreateDirectory($stage) | Out-Null
+    # A package.json HERE is required: npm walks up to the nearest one and would
+    # otherwise install into the repo root (which owns the manager plugin package).
+    [System.IO.File]::WriteAllText((Join-Path $stage 'package.json'), '{"name":"dsh-bundle-stage","private":true}')
     Write-Host "[bundle] npm install @deepseek-ai/dsh@$DshVersion (npmmirror, global-style)"
-    # npm installs into its CURRENT working directory — run it inside $stage,
-    # never the repo root (whose package.json belongs to the manager plugin).
+    # npm installs into the package root nearest the working directory — run it
+    # inside $stage, never the repo root.
     Push-Location $stage
     try {
         & $nodeExe $npmCli install "@deepseek-ai/dsh@$DshVersion" --global-style --omit=dev `
