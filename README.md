@@ -9,6 +9,35 @@ Windows 侧常驻托盘的 **DeepSeek Harness WebUI 管理器**：负责启动 d
 > 与旧项目的关系：本仓库为 v2.0+ 的独立实现（独立交付），旧项目
 > `FYHC1/dsh-webui-installer`（v1.4.x 脚本链路）收尾于 v1.4.2，不再大改。
 
+## 原汁原味的独立浏览器窗口
+
+管理器打开的不是"浏览器里的一个标签页"，而是 **Edge 应用窗口（`--app`）**——一套独立的、
+无地址栏/标签页/扩展干扰的 DeepSeek Harness 专用窗口，从观感到行为都像原生桌面应用：
+
+- **官方鲸鱼图标**：任务栏与窗口图标均为官方 `DeepSeek Harness.ico`
+  （`WM_SETICON` 32/16px + AUMID 任务栏身份），与 dsh 官方 WebUI 完全一致；
+- **专属浏览器数据目录**：每个实例一个独立 Edge profile
+  （`%LOCALAPPDATA%\dsh-web-manager-browser-<port>`），与日常浏览器彻底隔离，互不干扰；
+- **记住你的窗口**：尺寸/位置按实例记忆（`Window.Size/Position`），关闭再打开原样复现；
+- **弹出即是正确尺寸**：几何钩子（WinEventHook）在窗口**显示之前**完成尺寸设置——实测
+  从第一帧起就是记忆尺寸、全程零跳变（Edge 本身只认自己的默认 945×1020，`--window-size`/
+  `--start-minimized`/Preferences 全部无效，排除法矩阵见 docs/TESTING.md）；
+- **快速唤起**：关窗后预热驻留热进程，重开窗口 ~0.7–1.1s；无 URL 门控，窗口立即打开；
+- **窗口只是视图**：关窗不停服务，托盘/快捷方式随时一键重新唤起。
+
+## 快速打开窗口
+
+| 入口 | 操作 |
+|---|---|
+| Windows 桌面快捷方式 | `DeepSeek Harness WebUI (win).lnk` / `(wsl).lnk`（dsh 插件自动创建/维护，双击即开对应后端独立窗口） |
+| WSL 命令行 | `dsh-webui`（默认 WSL 端）/ `dsh-webui windows`（详见下文「WSL 命令：dsh-webui」） |
+| 托盘 | 左键单击图标、菜单「打开窗口」、实例子菜单「打开窗口」 |
+| 命令行动作 | `dsh-web-manager.exe open` / `open windows` / `open wsl` |
+
+所有入口都**按需启动**：只拉起目标后端的服务与窗口（v3.6 起不再顺带启动另一端）；
+某后端**尚未配置实例**时（从未添加或已被删除），入口会自动生成一个默认实例并启动，
+无需先手动「添加实例」。
+
 ## 用法
 
 Windows PowerShell：
