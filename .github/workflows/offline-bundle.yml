@@ -99,14 +99,23 @@ jobs:
         # Inno Setup cannot open source files with paths > MAX_PATH (260 chars).
         # The npm/pnpm trees go deeper than that under the repo checkout, so Inno
         # aborts with "cannot find the path specified" on the first file past the
-        # limit. Copy the bundle to a short root (pwsh handles long paths) so every
-        # source path stays under 260. Verified locally: 270-char path fails,
-        # 228-char path compiles.
-        shell: powershell
+        # limit. Copy the bundle to a short root so every source path stays under
+        # 260. Verified locally with Inno 6.7.3: a 270-char source path fails, a
+        # 228-char one compiles.
+        # NOTE: must run under pwsh — `shell: powershell` maps to Windows
+        # PowerShell 5.1 here (whose Copy-Item glob semantics choke on the tree).
+        shell: pwsh
         run: |
-          if (Test-Path D:\bundle) { Remove-Item D:\bundle -Recurse -Force }
-          Copy-Item -Path "bundle-out\dsh-offline-bundle\*" -Destination "D:\bundle" -Recurse
-          if (-not (Test-Path D:\bundle\bundle.json)) { throw "bundle staging failed" }
+          Remove-Item D:\bundle -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "bundle-out\dsh-offline-bundle" -Destination "D:\bundle" -Recurse
+          if (Test-Path D:\bundle\bundle.json) {
+            $bundleShort = "D:\bundle"
+          } elseif (Test-Path "D:\bundle\dsh-offline-bundle\bundle.json") {
+            $bundleShort = "D:\bundle\dsh-offline-bundle"
+          } else {
+            throw "bundle staging failed: bundle.json not found"
+          }
+          "BUNDLE_SHORT=$bundleShort" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Compile setup EXE
         shell: pwsh
         run: |
@@ -115,7 +124,7 @@ jobs:
           $tag = "${{ github.ref_name }}"
           if (-not $tag) { $tag = "ci" }
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
-            "/DBundleDir=D:\bundle" `
+            "/DBundleDir=$env:BUNDLE_SHORT" `
             "/DMyVersion=$mv" "/DPayloadTag=$tag" `
             ".\packaging\windows-installer.iss"
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
