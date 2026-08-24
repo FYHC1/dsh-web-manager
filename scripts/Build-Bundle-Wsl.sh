@@ -28,6 +28,7 @@ NODE_SOURCE="npmmirror"
 OUTDIR=""
 BAKE_PORT="3206"
 PLUGIN_SRC=""          # repo root for `dsh plugin add file:<path>`; default: parent of this script
+EXTRA_PLUGINS="dshmarket"   # space-separated extra plugins pre-installed in the baked profile
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -37,6 +38,7 @@ while [ $# -gt 0 ]; do
     --out) OUTDIR="$2"; shift 2 ;;
     --port) BAKE_PORT="$2"; shift 2 ;;
     --plugin-src) PLUGIN_SRC="$2"; shift 2 ;;
+    --extra-plugins) EXTRA_PLUGINS="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -171,7 +173,8 @@ fi
 pkill -P "$BAKE_PID" 2>/dev/null || true; kill "$BAKE_PID" 2>/dev/null || true
 sleep 1
 
-# 4b. Manager plugin into the baked profile.
+# 4b. Plugins into the baked profile: the manager plugin first, then any extra
+#     pre-installed plugins (default: dshmarket — the plugin marketplace).
 #     (`plugin` is a subcommand with its OWN required --profile.)
 log "bake: dsh plugin --profile web add file:$PLUGIN_SRC"
 run_dsh 0 pluginadd plugin --profile web add "file:$PLUGIN_SRC"
@@ -181,6 +184,20 @@ if [ "$EXIT_CODE" -ne 0 ]; then
   show_logs pluginadd
   die "plugin add failed with exit code $EXIT_CODE (logs above)"
 fi
+
+for EXTRA in $EXTRA_PLUGINS; do
+  [ -n "$EXTRA" ] || continue
+  TAG="pluginadd-$(echo "$EXTRA" | tr -cd 'A-Za-z0-9')"
+  log "bake: dsh plugin --profile web add $EXTRA"
+  run_dsh 0 "$TAG" plugin --profile web add "$EXTRA"
+  EXIT_CODE=0
+  wait "$BAKE_PID" || EXIT_CODE=$?
+  if [ "$EXIT_CODE" -ne 0 ]; then
+    show_logs "$TAG"
+    die "plugin add failed with exit code $EXIT_CODE ($EXTRA; logs above)"
+  fi
+  log "bake: plugin installed -> $EXTRA"
+done
 
 # 4c. Offline-start gate (dead proxies).
 log "bake: offline-start verification (dead proxies)"

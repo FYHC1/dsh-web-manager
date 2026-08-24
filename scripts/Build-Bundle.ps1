@@ -28,7 +28,8 @@ param(
     [switch]$SkipDsh,                        # reuse an existing bundle dsh\ dir
     [switch]$SkipProfile,                    # skip the ~/.dsh bake (debug only)
     [switch]$SkipManager,                    # skip Build.ps1 + dist copy (debug only)
-    [string]$WslPayloadDir = ''              # prebuilt WSL payload (from Build-Bundle-Wsl.sh); merged into bundle\wsl\
+    [string]$WslPayloadDir = '',             # prebuilt WSL payload (from Build-Bundle-Wsl.sh); merged into bundle\wsl\
+    [string]$ExtraPlugins = 'dshmarket'      # extra plugins pre-installed in the baked profile (space-separated; '' = none)
 )
 
 Set-StrictMode -Version Latest
@@ -234,19 +235,31 @@ if (-not $SkipProfile) {
     }
     Stop-BakeProcess $run1.Process
 
-    # 4b. Install the manager plugin into the baked profile.
-    # NOTE: `plugin` is a subcommand with its OWN required --profile option (the
-    # launcher-level --profile does not propagate into it).
-    Write-Host "[bundle] bake: dsh plugin --profile web add file:$projectRoot"
-    $run2 = Invoke-BakeDsh @('plugin', '--profile', 'web', 'add', "file:$projectRoot") $false 'pluginadd'
-    if (-not $run2.Process.WaitForExit(300000)) {
-        Stop-BakeProcess $run2.Process
-        Show-BakeLogs $run2 20
-        throw 'plugin add timed out after 300s (logs above).'
+    # 4b. Install plugins into the baked profile: the manager plugin first, then
+    #     any extra pre-installed plugins (default: dshmarket — the plugin
+    #     marketplace; users then install more from inside dsh).
+    #     NOTE: `plugin` is a subcommand with its OWN required --profile option
+    #     (the launcher-level --profile does not propagate into it).
+    $pluginSpecs = @("file:$projectRoot")
+    foreach ($extra in @($ExtraPlugins -split ' ')) {
+        $t = $extra.Trim()
+        if ($t -ne '') { $pluginSpecs += $t }
     }
-    if ($run2.Process.ExitCode -ne 0) {
-        Show-BakeLogs $run2 30
-        throw "plugin add failed with exit code $($run2.Process.ExitCode) (logs above)."
+    $run = $null
+    foreach ($spec in $pluginSpecs) {
+        $tag = if ($spec.StartsWith('file:')) { 'pluginadd' } else { 'pluginadd-' + ($spec -replace '[^A-Za-z0-9]', '') }
+        Write-Host "[bundle] bake: dsh plugin --profile web add $spec"
+        $run = Invoke-BakeDsh @('plugin', '--profile', 'web', 'add', $spec) $false $tag
+        if (-not $run.Process.WaitForExit(300000)) {
+            Stop-BakeProcess $run.Process
+            Show-BakeLogs $run 20
+            throw "plugin add timed out after 300s ($spec; logs above)."
+        }
+        if ($run.Process.ExitCode -ne 0) {
+            Show-BakeLogs $run 30
+            throw "plugin add failed with exit code $($run.Process.ExitCode) ($spec; logs above)."
+        }
+        Write-Host "[bundle] bake: plugin installed -> $spec"
     }
 
     # 4c. Offline-start gate: dead proxies, must still serve.
