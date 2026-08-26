@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace DshWebManager
 {
@@ -32,6 +33,13 @@ namespace DshWebManager
         private BridgeInfo _bridgeInfo;                 // cached runtime-bridge payload
         private DateTime _bridgeInfoAt = DateTime.MinValue;
         private static readonly TimeSpan BridgeInfoTtl = TimeSpan.FromSeconds(10);
+        // Fallback: when the runtime-bridge plugin is not loaded (e.g. the WSL
+        // profile has no dsh-web-manager yet), show a cached "dsh <version>" line
+        // so the status is still informative. Probed on a background thread, 60s TTL.
+        private string _fallbackSummary = String.Empty;
+        private DateTime _fallbackProbeAt = DateTime.MinValue;
+        private int _fallbackProbeRunning;
+        private static readonly TimeSpan FallbackProbeTtl = TimeSpan.FromSeconds(60);
         // Failure-path probe throttles: both IsServiceUp (WSL-side ss) and
         // IsWrapperAlive (systemd is-active) spawn wsl.exe processes; while a
         // service is down the heartbeat would otherwise call them every second.
@@ -417,12 +425,36 @@ namespace DshWebManager
             if (port <= 0 || String.IsNullOrEmpty(_config.BridgeToken)) return;
             if (DateTime.UtcNow.Subtract(_bridgeInfoAt) < BridgeInfoTtl) return;
             QueryBridgeInfo(port);
+            if (_bridgeInfo == null)
+                ScheduleFallbackProbe();
         }
 
-        /// <summary>Rich runtime status from the cached bridge payload ("" when unknown).</summary>
+        /// <summary>Rich runtime status from the cached bridge payload, or the
+        /// fallback version probe when the bridge plugin is not loaded ("" unknown).</summary>
         public string GetRuntimeSummary(int port)
         {
-            return _bridgeInfo == null ? String.Empty : _bridgeInfo.Summary;
+            if (_bridgeInfo != null) return _bridgeInfo.Summary;
+            return _fallbackSummary;
+        }
+
+        /// <summary>Background fallback probe: `dsh --version` in the distro
+        /// (login shell), cached 60 s so the 10 s heartbeat never blocks on a
+        /// wsl.exe spawn.</summary>
+        private void ScheduleFallbackProbe()
+        {
+            if (Interlocked.CompareExchange(ref _fallbackProbeRunning, 1, 0) != 0) return;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    if (DateTime.UtcNow.Subtract(_fallbackProbeAt) < FallbackProbeTtl) return;
+                    string v = UpdateChecker.GetCurrentWslDshVersion(_distro);
+                    _fallbackSummary = String.IsNullOrEmpty(v) ? String.Empty : "dsh " + v;
+                    _fallbackProbeAt = DateTime.UtcNow;
+                }
+                catch (Exception ex) { FileLog.Error("WslBackend fallback probe: " + ex.Message); }
+                finally { Interlocked.Exchange(ref _fallbackProbeRunning, 0); }
+            });
         }
     }
 }

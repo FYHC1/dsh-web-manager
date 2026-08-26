@@ -10,8 +10,9 @@ namespace DshWebManager
 {
     /// <summary>
     /// dsh web manager self-update: queries GitHub Releases (FYHC1/dsh-web-manager),
-    /// compares versions, downloads the dsh-web-manager.exe release asset and
-    /// verifies the binary before the manager hands off to the detached updater.
+    /// compares versions, downloads the manager exe release asset (v3.9: the asset
+    /// carries a version suffix, "dsh-web-manager-&lt;ver&gt;.exe") and verifies the
+    /// binary before the manager hands off to the detached updater.
     /// </summary>
     public static class ManagerUpdater
     {
@@ -67,6 +68,15 @@ namespace DshWebManager
             return parts;
         }
 
+        /// <summary>Matches the manager exe release asset: the legacy exact name
+        /// "dsh-web-manager.exe" or the version-suffixed "dsh-web-manager-&lt;ver&gt;.exe".</summary>
+        private static bool IsExeAsset(string name)
+        {
+            if (String.Equals(name, ExeAssetName, StringComparison.OrdinalIgnoreCase)) return true;
+            return name.StartsWith("dsh-web-manager-", StringComparison.OrdinalIgnoreCase)
+                && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Queries the latest release. apiOverride lets tests/mirrors point
         /// elsewhere ("" = official GitHub endpoint). Returns null on network errors.</summary>
         public static ReleaseInfo GetLatestRelease(string apiOverride)
@@ -109,7 +119,7 @@ namespace DshWebManager
                                 if (asset == null) continue;
                                 object name;
                                 if (!asset.TryGetValue("name", out name) || name == null) continue;
-                                if (!String.Equals(name.ToString(), ExeAssetName, StringComparison.OrdinalIgnoreCase)) continue;
+                                if (!IsExeAsset(name.ToString())) continue;
                                 object urlObj;
                                 if (asset.TryGetValue("browser_download_url", out urlObj) && urlObj != null)
                                     info.DownloadUrl = urlObj.ToString();

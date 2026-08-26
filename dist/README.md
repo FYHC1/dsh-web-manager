@@ -1,4 +1,4 @@
-# dsh web manager
+# dsh webui desktop
 
 Windows 侧常驻托盘的 **DeepSeek Harness WebUI 管理器**：负责启动 dsh web、拉起 Edge 应用窗口、守护服务进程、常驻系统托盘，并接管窗口图标与窗口尺寸记忆。
 
@@ -276,6 +276,8 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1   # 系统 csc.exe �
 
 ## 里程碑
 
+- **v3.8.1**：离线包预装 **dsh market**（插件商城，`dsh plugin --profile web add dshmarket`）——
+  用户开箱即可在商城里下载所需插件，最小化安装 + 使用便捷（`-ExtraPlugins` 可自定义预装列表）✅ 已交付
 - **v3.8**：WebView2 内嵌窗口后端（窗口归属管理器进程，任务栏鲸鱼图标不受
   「合并任务栏按钮」影响；`WindowBackend` 配置 + 运行时缺失自动回退 Edge）+
   离线安装包 `dsh-offline-bundle`（Build-Bundle / Install-Offline / Uninstall-Offline，
@@ -390,6 +392,9 @@ powershell -ExecutionPolicy Bypass -File Uninstall-Offline.ps1 -PurgeProfile  # 
   直连捆绑 shim（PATH 仅作为补充，可用 `-NoPath` 跳过）。
 - profile：拷贝预烘焙的 `~/.dsh`；已存在时只补缺文件，**绝不覆盖**
   `.credentials.yaml`（API Key 留占位，在 WebUI 里填）。
+- **v3.8.1**：烘焙的 profile 预装 **dsh market**（插件商城）——开箱即可在 WebUI
+  的商城里安装更多插件；构建时用 `-ExtraPlugins`（Windows）/ `--extra-plugins`（WSL）
+  自定义预装列表，空串则不预装。预装后仍过断网首启验收门。
 - WebView2 运行时缺失不阻塞安装：管理器自动回退 Edge 窗口模式（见上）。
 - 幂等升级：重跑新版 `Install-Offline.ps1` 即升级（robocopy 镜像 + 管理器版本比较
   不降级 + 配置保留）；离线机的升级 = 拿新版 bundle 重跑安装器。

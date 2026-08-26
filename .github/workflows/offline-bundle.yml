@@ -1,11 +1,13 @@
 name: offline-bundle
 
 # Builds the offline installers:
-#   wsl payload (linux)  -> bundle-wsl/ artifact
-#   windows setup EXE    -> dsh-offline-bundle-setup_<ver>_x64_<tag>.exe
-#   wsl deb              -> dsh-bundle_<ver>_amd64.deb
-#   bundle zip           -> dsh-offline-bundle-<ver>-<tag>.zip
-# A tag push (v*) also publishes a GitHub Release with all artifacts.
+#   windows setup EXE    -> dsh-webui-desktop-win-<ver>.exe
+#   wsl deb              -> dsh-webui-desktop-wsl-<ver>.deb
+#   wsl rpm              -> dsh-webui-desktop-wsl-<ver>.rpm
+#   bundle zip           -> dsh-webui-desktop-win-<ver>.zip
+# A tag push (v*) also publishes a GitHub Release with all artifacts. Gated to
+# the dsh-webui-desktop repo: dsh-web-manager publishes its own versioned
+# exe/runtime-zip assets instead of the offline-bundle set.
 on:
   push:
     tags: ['v*']
@@ -23,6 +25,7 @@ permissions:
 
 jobs:
   wsl-payload:
+    if: github.repository == 'FYHC1/dsh-webui-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -150,12 +153,19 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      - name: Stage release assets (versioned names)
+        # Naming convention: dsh-webui-desktop-{win,wsl}-<version>.{exe,deb,rpm,zip}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          ver="${tag#v}"
+          cp artifacts/wsl-deb/dsh-bundle-wsl_*_amd64.deb "artifacts/dsh-webui-desktop-wsl-${ver}.deb"
+          cp artifacts/wsl-rpm/dsh-bundle-wsl-*.rpm "artifacts/dsh-webui-desktop-wsl-${ver}.rpm"
+          cp artifacts/windows-setup/dsh-offline-bundle-setup_*.exe "artifacts/dsh-webui-desktop-win-${ver}.exe"
+          cp artifacts/bundle-zip/dsh-offline-bundle-*.zip "artifacts/dsh-webui-desktop-win-${ver}.zip"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" --generate-notes \
-            artifacts/wsl-deb/*.deb \
-            artifacts/wsl-rpm/*.rpm \
-            artifacts/windows-setup/*.exe \
-            artifacts/bundle-zip/*.zip
+            artifacts/dsh-webui-desktop-*

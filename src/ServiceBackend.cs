@@ -59,6 +59,12 @@ namespace DshWebManager
         private BridgeInfo _bridgeInfo;                 // cached runtime-bridge payload
         private DateTime _bridgeInfoAt = DateTime.MinValue;
         private static readonly TimeSpan BridgeInfoTtl = TimeSpan.FromSeconds(10);
+        // Fallback: when the runtime-bridge plugin is not loaded, show a cached
+        // "dsh <version>" line. Probed on a background thread, 60s TTL.
+        private string _fallbackSummary = String.Empty;
+        private DateTime _fallbackProbeAt = DateTime.MinValue;
+        private int _fallbackProbeRunning;
+        private static readonly TimeSpan FallbackProbeTtl = TimeSpan.FromSeconds(60);
 
         public WindowsBackend(ManagerConfig config) { _config = config; }
 
@@ -156,11 +162,33 @@ namespace DshWebManager
             if (port <= 0 || String.IsNullOrEmpty(_config.BridgeToken)) return;
             if (DateTime.UtcNow.Subtract(_bridgeInfoAt) < BridgeInfoTtl) return;
             QueryBridgeInfo(port);
+            if (_bridgeInfo == null)
+                ScheduleFallbackProbe();
         }
 
         public string GetRuntimeSummary(int port)
         {
-            return _bridgeInfo == null ? String.Empty : _bridgeInfo.Summary;
+            if (_bridgeInfo != null) return _bridgeInfo.Summary;
+            return _fallbackSummary;
+        }
+
+        /// <summary>Background fallback probe: `dsh --version` on Windows, cached
+        /// 60 s so the 10 s heartbeat never blocks on a process spawn.</summary>
+        private void ScheduleFallbackProbe()
+        {
+            if (System.Threading.Interlocked.CompareExchange(ref _fallbackProbeRunning, 1, 0) != 0) return;
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    if (DateTime.UtcNow.Subtract(_fallbackProbeAt) < FallbackProbeTtl) return;
+                    string v = UpdateChecker.GetCurrentWindowsDshVersion();
+                    _fallbackSummary = String.IsNullOrEmpty(v) ? String.Empty : "dsh " + v;
+                    _fallbackProbeAt = DateTime.UtcNow;
+                }
+                catch (Exception ex) { FileLog.Error("WindowsBackend fallback probe: " + ex.Message); }
+                finally { System.Threading.Interlocked.Exchange(ref _fallbackProbeRunning, 0); }
+            });
         }
 
         /// <summary>

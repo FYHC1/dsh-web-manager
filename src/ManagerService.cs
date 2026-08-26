@@ -3,6 +3,7 @@ using System.Threading;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 namespace DshWebManager
@@ -109,7 +110,7 @@ namespace DshWebManager
                 OpenDefaultBackendWindow();
             _timer.Change(0, 1000);
             // v3.0: throttled dsh update check in the background (24 h).
-            ThreadPool.QueueUserWorkItem(_ => CheckForUpdates());
+            ThreadPool.QueueUserWorkItem(_ => CheckForUpdatesThrottled());
         }
 
         /// <summary>Resolves config.WindowBackend into EdgeWindow.Mode:
@@ -441,83 +442,162 @@ namespace DshWebManager
             });
         }
 
-        /// <summary>Throttled dsh update check; balloons when a newer version exists.</summary>
+        /// <summary>Manual dsh update check (tray 检查 dsh 更新): unthrottled and
+        /// always reports the outcome (latest / already-latest / failure). A silent
+        /// return here is exactly what the user experienced as "no feedback".</summary>
         public void CheckForUpdates()
         {
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try { CheckManagerUpdateThrottled(); }
                 catch (Exception ex) { FileLog.Error("CheckManagerUpdateThrottled: " + ex.Message); }
-                try
-                {
-                    string distro = String.Empty;
-                    if (_config.IsWsl || _config.EffectiveInstances.Count > 0)
-                    {
-                        foreach (InstanceConfig inst in _config.EffectiveInstances)
-                        {
-                            if (inst.IsWsl && !String.IsNullOrWhiteSpace(inst.WslDistro)) { distro = inst.WslDistro; break; }
-                        }
-                        if (String.IsNullOrEmpty(distro))
-                        {
-                            string resolved;
-                            if (WslTools.ResolveDistro(_config.WslDistro, _config.LastWslDistro, out resolved)) distro = resolved;
-                        }
-                    }
-                    if (String.IsNullOrEmpty(distro))
-                    {
-                        FileLog.Info("CheckForUpdates: no WSL distro to check; skipping");
-                        return;
-                    }
-                    string current = TryGetBridgeDshVersion();
-                    string latest = UpdateChecker.CheckThrottled(_config, distro, current);
-                    if (String.IsNullOrEmpty(latest)) return;
-                    var b = Balloon;
-                    if (b != null)
-                    {
-                        string cur = String.IsNullOrEmpty(current) ? UpdateChecker.GetCurrentWslDshVersion(distro) : current;
-                        b("dsh web manager", "发现 dsh 新版本 " + latest + "（当前 " + cur + "）。可在托盘菜单「更新 dsh」一键更新。");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    FileLog.Error("CheckForUpdates: " + ex.Message);
-                }
+                try { CheckDshUpdate(true); }
+                catch (Exception ex) { FileLog.Error("CheckForUpdates: " + ex.Message); }
             });
         }
 
-        /// <summary>Current dsh version from the first reachable runtime bridge ("" if none).</summary>
+        /// <summary>Startup dsh update check: throttled to 24 h, balloons only when a
+        /// newer version exists (keeps a fresh install quiet).</summary>
+        public void CheckForUpdatesThrottled()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { CheckManagerUpdateThrottled(); }
+                catch (Exception ex) { FileLog.Error("CheckManagerUpdateThrottled: " + ex.Message); }
+                try { CheckDshUpdate(false); }
+                catch (Exception ex) { FileLog.Error("CheckForUpdatesThrottled: " + ex.Message); }
+            });
+        }
+
+        /// <summary>Core dsh update check for the active backend (runtime bridge
+        /// version preferred, else that platform's `dsh --version`). `manual`
+        /// bypasses the 24 h throttle and always balloons a result.</summary>
+        private void CheckDshUpdate(bool manual)
+        {
+            DateTime last;
+            DateTime.TryParse(_config.LastVersionCheckUtc, out last);
+            if (!manual && DateTime.UtcNow.Subtract(last) < TimeSpan.FromHours(24))
+                return; // startup check within throttle: keep quiet
+
+            string current = TryGetBridgeDshVersion();
+            if (String.IsNullOrEmpty(current))
+            {
+                if (IsWslActive())
+                {
+                    string distro = ResolveDshDistro();
+                    if (!String.IsNullOrEmpty(distro)) current = UpdateChecker.GetCurrentWslDshVersion(distro);
+                }
+                else
+                {
+                    current = UpdateChecker.GetCurrentWindowsDshVersion();
+                }
+            }
+
+            string latest = UpdateChecker.GetLatestDshVersion();
+            if (String.IsNullOrEmpty(latest))
+            {
+                if (manual) Balloon("dsh web manager", "检查 dsh 更新失败（网络或 npmmirror 镜像不可达）");
+                return;
+            }
+            _config.LastVersionCheckUtc = DateTime.UtcNow.ToString("o");
+            _config.LastKnownLatest = latest;
+            _config.Save();
+
+            if (String.IsNullOrEmpty(current))
+            {
+                if (manual) Balloon("dsh web manager", "未获取到当前 dsh 版本，请确认 dsh 已安装并配置 PATH");
+                return;
+            }
+            if (String.Equals(current.Trim(), latest.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                if (manual) Balloon("dsh web manager", "已是最新版本 (v" + current + ")");
+                return;
+            }
+            Balloon("dsh web manager", "发现 dsh 新版本 " + latest + "（当前 " + current + "）。可在托盘菜单「更新 dsh」一键更新。");
+        }
+
+        /// <summary>WSL distro for the update flows ("" when none usable).</summary>
+        private string ResolveDshDistro()
+        {
+            foreach (InstanceConfig inst in _config.EffectiveInstances)
+            {
+                if (inst.IsWsl && !String.IsNullOrWhiteSpace(inst.WslDistro)) return inst.WslDistro;
+            }
+            string resolved;
+            if (WslTools.ResolveDistro(_config.WslDistro, _config.LastWslDistro, out resolved)) return resolved;
+            return String.Empty;
+        }
+
+        /// <summary>true when the active backend is WSL (update flows target it).</summary>
+        private bool IsWslActive()
+        {
+            return String.Equals(_config.ActiveBackend, "wsl", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Current dsh version from the runtime bridge of the active
+        /// backend's controller first, then any reachable controller ("" if none).</summary>
         private string TryGetBridgeDshVersion()
         {
+            InstanceController preferred = ActiveController;
+            string v = ReadControllerBridgeVersion(preferred);
+            if (!String.IsNullOrEmpty(v)) return v;
             foreach (InstanceController c in _controllers)
             {
-                if (c.Backend == null) continue;
-                try
-                {
-                    BridgeInfo info = c.Backend.QueryBridgeInfo(c.ActivePort);
-                    if (info != null && info.Reachable && !String.IsNullOrEmpty(info.DshVersion))
-                        return info.DshVersion;
-                }
-                catch (Exception ex) { FileLog.Error("TryGetBridgeDshVersion: " + ex.Message); }
+                if (c == preferred) continue;
+                v = ReadControllerBridgeVersion(c);
+                if (!String.IsNullOrEmpty(v)) return v;
             }
             return String.Empty;
         }
 
-        /// <summary>One-click update of the WSL-side global dsh package.</summary>
+        private static string ReadControllerBridgeVersion(InstanceController c)
+        {
+            if (c == null || c.Backend == null) return String.Empty;
+            try
+            {
+                BridgeInfo info = c.Backend.QueryBridgeInfo(c.ActivePort);
+                if (info != null && info.Reachable && !String.IsNullOrEmpty(info.DshVersion))
+                    return info.DshVersion;
+            }
+            catch (Exception ex) { FileLog.Error("TryGetBridgeDshVersion: " + ex.Message); }
+            return String.Empty;
+        }
+
+        /// <summary>One-click update of the dsh package for the active backend
+        /// (Windows npm install -g, or the WSL-side global package).</summary>
         public void ApplyDshUpdate()
         {
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
                 {
-                    string distro = String.Empty;
-                    string resolved;
-                    if (WslTools.ResolveDistro(_config.WslDistro, _config.LastWslDistro, out resolved)) distro = resolved;
-                    if (String.IsNullOrEmpty(distro)) { Balloon("dsh web manager", "未找到 WSL 发行版，无法更新"); return; }
                     var b = Balloon;
-                    if (b != null) b("dsh web manager", "正在更新 WSL dsh（npmmirror）…");
-                    bool ok = UpdateChecker.UpdateWslDsh(distro);
-                    if (b != null)
-                        b("dsh web manager", ok ? "dsh 更新完成：" + UpdateChecker.GetCurrentWslDshVersion(distro) : "dsh 更新失败，请查看日志");
+                    if (IsWslActive())
+                    {
+                        string distro = ResolveDshDistro();
+                        if (String.IsNullOrEmpty(distro)) { if (b != null) b("dsh web manager", "未找到 WSL 发行版，无法更新"); return; }
+                        if (b != null) b("dsh web manager", "正在更新 dsh（WSL " + distro + "，npmmirror）…");
+                        bool ok = UpdateChecker.UpdateWslDsh(distro);
+                        if (b != null)
+                            b("dsh web manager", ok ? "dsh 更新完成：" + UpdateChecker.GetCurrentWslDshVersion(distro) : "dsh 更新失败，请查看日志");
+                    }
+                    else
+                    {
+                        if (String.IsNullOrEmpty(DshLauncher.FindDshCommand()))
+                        { if (b != null) b("dsh web manager", "未找到 dsh 命令（请安装 dsh 并更新 PATH）"); return; }
+                        if (b != null) b("dsh web manager", "正在更新 dsh（Windows，npmmirror）…");
+                        int rc = UpdateChecker.UpdateWindowsDsh();
+                        if (rc == 2)
+                        {
+                            if (b != null) b("dsh web manager", "当前 dsh 为离线包内置版本（非 npm 全局安装），管理器无法直接更新；请重新运行离线包安装器 (Install-Offline.ps1) 升级");
+                        }
+                        else
+                        {
+                            string newVer = UpdateChecker.GetCurrentWindowsDshVersion();
+                            if (b != null)
+                                b("dsh web manager", rc == 0 ? "dsh 更新完成：" + newVer : "dsh 更新失败，请查看日志");
+                        }
+                    }
                     _config.LastVersionCheckUtc = String.Empty; // allow an immediate re-check
                     _config.Save();
                 }
@@ -603,8 +683,8 @@ namespace DshWebManager
                     }
                     if (String.IsNullOrEmpty(rel.DownloadUrl))
                     {
-                        FileLog.Error("ApplyManagerUpdate: release " + rel.Tag + " has no dsh-web-manager.exe asset");
-                        Balloon("dsh web manager", "发布 " + rel.Tag + " 未附带 dsh-web-manager.exe，无法自动更新");
+                        FileLog.Error("ApplyManagerUpdate: release " + rel.Tag + " has no dsh-web-manager exe asset");
+                        Balloon("dsh web manager", "发布 " + rel.Tag + " 未附带 dsh-web-manager 安装包，无法自动更新");
                         return;
                     }
                     Balloon("dsh web manager", "正在下载 dsh web manager " + rel.Tag + " …");
@@ -643,24 +723,21 @@ namespace DshWebManager
             });
         }
 
-        /// <summary>One-click refresh of the dsh-web-manager plugin bundle inside the
-        /// WSL dsh profile: `dsh plugin remove` + `add` with the recorded spec
-        /// (auto-detected from the profile's package.json, or PluginUpdateSpec).</summary>
+        /// <summary>One-click refresh of the dsh-web-manager plugin bundle in the
+        /// ACTIVE backend's dsh profile: `dsh plugin remove` + `add` with the recorded
+        /// spec (auto-detected from that platform's profile package.json, or
+        /// PluginUpdateSpec). Windows (dsh runs natively) and WSL are both supported —
+        /// previously this was WSL-only, so a Windows profile reported
+        /// "未找到插件的安装来源".</summary>
         public void UpdatePluginBundle()
         {
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
                 {
-                    string distro;
-                    if (!WslTools.ResolveDistro(_config.WslDistro, _config.LastWslDistro, out distro))
-                    {
-                        Balloon("dsh web manager", "未找到 WSL 发行版，无法更新插件包");
-                        return;
-                    }
                     string profile = String.IsNullOrWhiteSpace(_config.Profile) ? "web" : _config.Profile;
                     // Same guard as WslBackend.Start: the profile is interpolated
-                    // into node -e / bash command strings, so spaces/tabs (which
+                    // into node -e / bash / cmd command strings, so spaces/tabs (which
                     // would break quoting) must be rejected up front.
                     if (profile.IndexOfAny(new char[] { ' ', '\t' }) >= 0)
                     {
@@ -668,37 +745,10 @@ namespace DshWebManager
                         Balloon("dsh web manager", "Profile 不能包含空格，插件包更新已取消");
                         return;
                     }
-                    string spec = String.IsNullOrWhiteSpace(_config.PluginUpdateSpec)
-                        ? ReadPluginSpec(distro, profile)
-                        : _config.PluginUpdateSpec;
-                    if (String.IsNullOrWhiteSpace(spec))
-                    {
-                        FileLog.Error("UpdatePluginBundle: no spec recorded for dsh-web-manager in profile " + profile);
-                        Balloon("dsh web manager", "未找到插件的安装来源，请在 config 中设置 PluginUpdateSpec");
-                        return;
-                    }
-                    FileLog.Info("UpdatePluginBundle: refreshing " + profile + " with spec " + spec);
-                    Balloon("dsh web manager", "正在更新 dsh 插件包（" + profile + "）…");
-                    // Remove is best-effort (the package may not be installed yet).
-                    WslTools.RunCapture(distro, "bash", new string[] { "-lc",
-                        "dsh plugin --profile " + WslTools.BashQuote(profile) + " remove dsh-web-manager" }, 120000);
-                    CommandResult add = WslTools.RunCapture(distro, "bash", new string[] { "-lc",
-                        "dsh plugin --profile " + WslTools.BashQuote(profile) + " add " + WslTools.BashQuote(spec) }, 180000);
-                    if (add.ExitCode == 0)
-                    {
-                        // Report exactly which package version was installed and from where.
-                        string ver = ReadPluginVersion(distro, profile);
-                        string detail = String.IsNullOrEmpty(ver) ? "dsh-web-manager" : "dsh-web-manager@" + ver;
-                        FileLog.Info("UpdatePluginBundle: updated " + detail + " in " + profile + " from " + spec);
-                        Balloon("dsh web manager", "dsh 插件包已更新（" + profile + "）：" + detail
-                            + "（来源 " + spec + "），重启 dsh 后生效");
-                    }
+                    if (IsWslActive())
+                        UpdatePluginInWsl(profile);
                     else
-                    {
-                        FileLog.Error("UpdatePluginBundle add failed: "
-                            + (add.StandardOutput ?? String.Empty) + (add.StandardError ?? String.Empty));
-                        Balloon("dsh web manager", "插件包更新失败，请查看日志");
-                    }
+                        UpdatePluginOnWindows(profile);
                 }
                 catch (Exception ex)
                 {
@@ -706,6 +756,113 @@ namespace DshWebManager
                     try { Balloon("dsh web manager", "更新插件包失败: " + ex.Message); } catch { }
                 }
             });
+        }
+
+        private void UpdatePluginInWsl(string profile)
+        {
+            string distro = ResolveDshDistro();
+            if (String.IsNullOrEmpty(distro))
+            {
+                Balloon("dsh web manager", "未找到 WSL 发行版，无法更新插件包");
+                return;
+            }
+            // PluginUpdateSpec > the spec recorded in the WSL profile > the Windows
+            // profile's spec (converted to /mnt/c) > the npm package name. Never
+            // empty, so a profile without the plugin gets it INSTALLED instead of
+            // reporting the old confusing "未找到插件的安装来源".
+            string spec = ResolveWslPluginSpec(distro, profile);
+            FileLog.Info("UpdatePluginInWsl: refreshing " + profile + " with spec " + spec);
+            Balloon("dsh web manager", "正在更新 dsh 插件包（WSL " + distro + " / " + profile + "）…");
+            // Remove is best-effort (the package may not be installed yet).
+            WslTools.RunCapture(distro, "bash", new string[] { "-lc",
+                "dsh plugin --profile " + WslTools.BashQuote(profile) + " remove dsh-web-manager" }, 120000);
+            CommandResult add = WslTools.RunCapture(distro, "bash", new string[] { "-lc",
+                "dsh plugin --profile " + WslTools.BashQuote(profile) + " add " + WslTools.BashQuote(spec) }, 180000);
+            ReportPluginUpdate(add, profile, spec, ReadPluginVersion(distro, profile));
+        }
+
+        private void UpdatePluginOnWindows(string profile)
+        {
+            string dsh = DshLauncher.FindDshCommand();
+            if (String.IsNullOrEmpty(dsh))
+            {
+                Balloon("dsh web manager", "未找到 dsh 命令（请安装 dsh 并更新 PATH），无法更新插件包");
+                return;
+            }
+            // PluginUpdateSpec > the spec recorded in the Windows profile > npm name.
+            string spec = ResolveWindowsPluginSpec(profile);
+            if (spec.IndexOf(' ') >= 0)
+            {
+                FileLog.Error("UpdatePluginOnWindows: spec with spaces is not supported: " + spec);
+                Balloon("dsh web manager", "插件来源路径包含空格，暂不支持，请在 config 中设置 PluginUpdateSpec");
+                return;
+            }
+            FileLog.Info("UpdatePluginOnWindows: refreshing " + profile + " with spec " + spec);
+            Balloon("dsh web manager", "正在更新 dsh 插件包（Windows / " + profile + "）…");
+            // `dsh plugin` forwards to a bare `pnpm`; the bundled node ships only a
+            // corepack shim, so prepend its dir to the child PATH when pnpm is not
+            // globally installed (scoped to this process only).
+            string pnpm = UpdateChecker.FindPnpmCommand();
+            string pnpmDir = String.IsNullOrEmpty(pnpm) ? null : Path.GetDirectoryName(pnpm);
+            // Remove is best-effort (the package may not be installed yet).
+            UpdateChecker.RunWindowsCommand("\"" + dsh + "\" plugin --profile " + profile + " remove dsh-web-manager", 120000, pnpmDir);
+            CommandResult add = UpdateChecker.RunWindowsCommand("\"" + dsh + "\" plugin --profile " + profile + " add " + spec, 180000, pnpmDir);
+            ReportPluginUpdate(add, profile, spec, ReadWindowsPluginVersion(profile));
+        }
+
+        /// <summary>Common success/failure balloon for a plugin remove+add round.</summary>
+        private void ReportPluginUpdate(CommandResult add, string profile, string spec, string ver)
+        {
+            if (add.ExitCode == 0)
+            {
+                // Report exactly which package version was installed and from where.
+                string detail = String.IsNullOrEmpty(ver) ? "dsh-web-manager" : "dsh-web-manager@" + ver;
+                FileLog.Info("UpdatePluginBundle: updated " + detail + " in " + profile + " from " + spec);
+                Balloon("dsh web manager", "dsh 插件包已更新（" + profile + "）：" + detail
+                    + "（来源 " + spec + "），重启 dsh 后生效");
+            }
+            else
+            {
+                // Surface the actual reason (e.g. "[ERR_PNPM_FETCH_404] ...
+                // not in the npm registry") instead of a generic failure or pnpm's
+                // informational banner — the user reported a confusing message here.
+                string output = ((add.StandardOutput ?? String.Empty) + (add.StandardError ?? String.Empty)).Trim();
+                string first = FirstErrorLine(output);
+                FileLog.Error("UpdatePluginBundle add failed: " + output);
+                Balloon("dsh web manager", "插件包更新失败"
+                    + (String.IsNullOrEmpty(first)
+                        ? "，退出码 " + add.ExitCode
+                        : "：" + Truncate(first, 110))
+                    + "，请查看日志");
+            }
+        }
+
+        /// <summary>First line that actually explains a failure (e.g. an ERR_/not
+        /// found/"pnpm not found" line), skipping pnpm's informational banners.</summary>
+        private static string FirstErrorLine(string text)
+        {
+            if (String.IsNullOrEmpty(text)) return String.Empty;
+            string[] lines = text.Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            string fallback = String.Empty;
+            foreach (string line in lines)
+            {
+                string t = line.Trim();
+                if (t.Length == 0) continue;
+                if (fallback.Length == 0 && !t.StartsWith("\u2713") && !t.StartsWith("Progress:"))
+                    fallback = t;
+                string low = t.ToLowerInvariant();
+                if (low.Contains("err_") || low.Contains("err!") || low.Contains("error")
+                    || low.Contains("not in the npm registry") || low.Contains("not found")
+                    || low.Contains("pnpm not found") || low.Contains("enoent")
+                    || low.Contains("could not") || low.Contains("failed"))
+                    return t;
+            }
+            return fallback;
+        }
+
+        private static string Truncate(string text, int max)
+        {
+            return text.Length <= max ? text : text.Substring(0, max) + "...";
         }
 
         /// <summary>Reads the recorded install spec of dsh-web-manager from the
@@ -733,6 +890,119 @@ namespace DshWebManager
             CommandResult r = WslTools.RunCapture(distro, "bash", new string[] { "-lc", script }, 30000);
             if (r.ExitCode != 0) return String.Empty;
             return (r.StandardOutput ?? String.Empty).Trim();
+        }
+
+        /// <summary>Reads the recorded install spec of dsh-web-manager from the
+        /// Windows profile's package.json (e.g. "file:C:/.../dsh-web-manager").
+        /// Empty when the package is not a direct dependency of the profile.</summary>
+        private static string ReadWindowsPluginSpec(string profile)
+        {
+            string pkg = WindowsProfilePackageJson(profile);
+            if (String.IsNullOrEmpty(pkg) || !File.Exists(pkg)) return String.Empty;
+            try
+            {
+                JavaScriptSerializer ser = new JavaScriptSerializer();
+                Dictionary<string, object> package = ser.Deserialize<Dictionary<string, object>>(File.ReadAllText(pkg));
+                if (package == null) return String.Empty;
+                string spec = ReadDependencySpec(package, "dependencies");
+                if (!String.IsNullOrEmpty(spec)) return spec;
+                return ReadDependencySpec(package, "optionalDependencies");
+            }
+            catch (Exception ex) { FileLog.Error("ReadWindowsPluginSpec: " + ex.Message); }
+            return String.Empty;
+        }
+
+        /// <summary>Installed dsh-web-manager version in the Windows profile ("" if unreadable).</summary>
+        private static string ReadWindowsPluginVersion(string profile)
+        {
+            string baseDir = WindowsDshHome();
+            if (String.IsNullOrEmpty(baseDir)) return String.Empty;
+            string pkg = Path.Combine(baseDir, "profiles", profile, "node_modules", "dsh-web-manager", "package.json");
+            try
+            {
+                if (!File.Exists(pkg)) return String.Empty;
+                JavaScriptSerializer ser = new JavaScriptSerializer();
+                Dictionary<string, object> package = ser.Deserialize<Dictionary<string, object>>(File.ReadAllText(pkg));
+                object v;
+                if (package != null && package.TryGetValue("version", out v) && v != null) return v.ToString();
+            }
+            catch { }
+            return String.Empty;
+        }
+
+        private static string WindowsDshHome()
+        {
+            string home = Environment.GetEnvironmentVariable("DSH_HOME");
+            if (!String.IsNullOrWhiteSpace(home)) return home.Trim().TrimEnd('\\');
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (String.IsNullOrEmpty(userProfile)) return String.Empty;
+            return Path.Combine(userProfile, ".dsh");
+        }
+
+        private static string WindowsProfilePackageJson(string profile)
+        {
+            string baseDir = WindowsDshHome();
+            if (String.IsNullOrEmpty(baseDir)) return String.Empty;
+            return Path.Combine(baseDir, "profiles", profile, "package.json");
+        }
+
+        private static string ReadDependencySpec(Dictionary<string, object> package, string section)
+        {
+            object o;
+            if (package.TryGetValue(section, out o) && o is Dictionary<string, object>)
+            {
+                object v;
+                if (((Dictionary<string, object>)o).TryGetValue("dsh-web-manager", out v) && v != null)
+                    return v.ToString();
+            }
+            return String.Empty;
+        }
+
+        /// <summary>Plugin install spec for the Windows profile:
+        /// PluginUpdateSpec &gt; recorded spec in the Windows profile &gt; the GitHub
+        /// repo (the package is not published to the npm registry - pnpm 404s).</summary>
+        private string ResolveWindowsPluginSpec(string profile)
+        {
+            if (!String.IsNullOrWhiteSpace(_config.PluginUpdateSpec)) return _config.PluginUpdateSpec;
+            string recorded = ReadWindowsPluginSpec(profile);
+            return String.IsNullOrWhiteSpace(recorded) ? DefaultPluginSpec : recorded;
+        }
+
+        /// <summary>Plugin install spec for the WSL profile: PluginUpdateSpec &gt;
+        /// recorded spec in the WSL profile &gt; recorded Windows spec converted to a
+        /// /mnt/c path &gt; the GitHub repo. Never empty, so an uninstalled plugin is
+        /// installed rather than reported as a missing install source.</summary>
+        private string ResolveWslPluginSpec(string distro, string profile)
+        {
+            if (!String.IsNullOrWhiteSpace(_config.PluginUpdateSpec)) return _config.PluginUpdateSpec;
+            string wsl = ReadPluginSpec(distro, profile);
+            if (!String.IsNullOrWhiteSpace(wsl)) return wsl;
+            string win = ReadWindowsPluginSpec(profile);
+            if (!String.IsNullOrWhiteSpace(win))
+            {
+                string converted = ToWslInstallSpec(win);
+                if (!String.IsNullOrWhiteSpace(converted)) return converted;
+            }
+            return DefaultPluginSpec;
+        }
+
+        /// <summary>Last-resort install source (repo root; the package is not on npm).</summary>
+        private const string DefaultPluginSpec = "github:FYHC1/dsh-web-manager#main";
+
+        /// <summary>Converts a Windows file: spec ("file:C:/x/y") to the
+        /// WSL-equivalent "file:/mnt/c/x/y"; other specs pass through unchanged.</summary>
+        private static string ToWslInstallSpec(string spec)
+        {
+            string s = (spec ?? String.Empty).Trim();
+            if (!s.StartsWith("file:", StringComparison.OrdinalIgnoreCase)) return s;
+            string body = s.Substring(5);
+            if (body.Length >= 2 && Char.IsLetter(body[0]) && body[1] == ':')
+            {
+                char drive = Char.ToLowerInvariant(body[0]);
+                string rest = body.Substring(2).Replace('\\', '/').TrimStart('/');
+                return "file:/mnt/" + drive + "/" + rest;
+            }
+            return s;
         }
 
         /// <summary>Exits the tray without stopping dsh services so the detached
