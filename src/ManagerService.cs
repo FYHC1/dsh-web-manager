@@ -418,10 +418,14 @@ namespace DshWebManager
 
         /// <summary>Background diagnostic: ~10s after opening, if the service is
         /// still not reachable from Windows (WSL forwarding off / service down),
-        /// tell the user why instead of leaving them staring at an error page.</summary>
+        /// tell the user why instead of leaving them staring at an error page.
+        /// The text is backend-specific: a Windows instance that never came up
+        /// (e.g. dsh was uninstalled and PATH no longer resolves dsh.cmd) must not
+        /// be reported as a WSL/distro problem.</summary>
         private void ScheduleReachabilityCheck(InstanceController c)
         {
             int port = c.ActivePort;
+            bool isWsl = c.Instance != null && c.Instance.IsWsl;
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
@@ -434,9 +438,28 @@ namespace DshWebManager
                     var b = Balloon;
                     if (b == null) return;
                     if (serviceUp)
-                        b("dsh web manager", "服务在运行，但 Windows 暂时无法访问 (localhostForwarding 关闭？)；窗口稍后会自动加载");
-                    else
+                    {
+                        // Service answers natively but the window cannot reach the port yet.
+                        if (isWsl)
+                            b("dsh web manager", "服务在运行，但 Windows 暂时无法访问 (localhostForwarding 关闭？)；窗口稍后会自动加载");
+                        else
+                            b("dsh web manager", "服务在运行，但窗口暂时无法访问；请稍候或重新打开窗口");
+                    }
+                    else if (isWsl)
+                    {
                         b("dsh web manager", "WSL 服务未就绪：请检查发行版配置（wslDistro）或该发行版内是否安装 dsh");
+                    }
+                    else
+                    {
+                        // Windows 实例不可达：优先报告启动失败的真实原因（典型场景：dsh 被
+                        // 卸载后 PATH 中已无 dsh.cmd，LastError="未找到 dsh 命令（请安装 dsh
+                        // 并更新 PATH）"），而不是沿用 WSL 的文案。
+                        string why = (c.State == InstanceState.Error && !String.IsNullOrEmpty(c.LastError)) ? c.LastError : null;
+                        if (String.IsNullOrEmpty(why))
+                            b("dsh web manager", "Windows 端未检测到 dsh，请先安装 dsh（dsh web manager 桌面版 / 离线安装包）");
+                        else
+                            b("dsh web manager", "Windows dsh 服务未就绪：" + why);
+                    }
                 }
                 catch (Exception ex) { FileLog.Error("ReachabilityCheck: " + ex.Message); }
             });
