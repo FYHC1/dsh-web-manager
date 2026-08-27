@@ -28,13 +28,19 @@ try {
     }
 } catch { }
 
-# 3. Remove shortcuts.
-$shortcutName = 'DeepSeek Harness WebUI (manager).lnk'
+# 3. Remove shortcuts (shared tray, Windows backend, WSL backend).
+$shortcutNames = @(
+    'DeepSeek Harness WebUI (manager).lnk',
+    'DeepSeek Harness WebUI (win).lnk',
+    'DeepSeek Harness WebUI (wsl).lnk'
+)
 $desktop = [Environment]::GetFolderPath('Desktop')
 $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 foreach ($dir in @($desktop, $startMenu)) {
-    $p = Join-Path $dir $shortcutName
-    if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force }
+    foreach ($lnk in $shortcutNames) {
+        $p = Join-Path $dir $lnk
+        if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force }
+    }
 }
 
 # 4. Optional data purge; otherwise keep shared config, logs and the icon.
