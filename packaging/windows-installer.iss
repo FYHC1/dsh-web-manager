@@ -62,7 +62,16 @@ Name: "zh"; MessagesFile: "innosetup\ChineseSimplified.isl"
 zh.WelcomeLabel2=这将把离线一体化包（便携 Node + dsh + 预烘焙 profile + dsh web manager 托盘）安装到您的电脑。%n%n继续之前请关闭其他应用程序。
 
 [Files]
-Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+; The ~200k-file heavy trees (node/dsh/profile-web/wsl) travel as ONE archive
+; (payload.zip, already deflate-compressed) so Inno + the AV stack chew on a
+; single stream; Install-Offline.ps1 unpacks it straight to the final install
+; root with the system tar. nocompression: double-compressing the zip gains
+; little and a decode pass only slows the install down.
+Source: "{#BundleDir}\payload.zip"; DestDir: "{app}"; Flags: nocompression
+Source: "{#BundleDir}\dsh-web-manager\*"; DestDir: "{app}\dsh-web-manager"; Flags: recursesubdirs createallsubdirs
+Source: "{#BundleDir}\Install-Offline.ps1"; DestDir: "{app}"
+Source: "{#BundleDir}\Uninstall-Offline.ps1"; DestDir: "{app}"
+Source: "{#BundleDir}\bundle.json"; DestDir: "{app}"
 
 [Run]
 Filename: "powershell.exe"; \

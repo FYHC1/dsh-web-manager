@@ -52,9 +52,22 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     Write-Host "[offline] bundle: v$($manifest.BundleVersion) node=$($manifest.Node.Version) dsh=$($manifest.Dsh.Version) manager=$($manifest.Manager.Version)"
 }
-foreach ($part in @('node\node.exe', 'dsh\@deepseek-ai\dsh\package.json')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $BundleDir $part) -PathType Leaf)) {
-        throw "Bundle incomplete: $part missing under $BundleDir (rebuild with scripts\Build-Bundle.ps1)."
+# Two delivery layouts share this installer:
+#   Layout B (exe setup): heavy trees (node/dsh/profile-web/wsl) travel as ONE
+#     payload.zip; Install-Offline extracts it straight to $TargetRoot with
+#     the system tar (single stream, no per-file copy).
+#   Layout A (portable zip): the trees sit unpacked beside this script.
+$payloadZip = Join-Path $BundleDir 'payload.zip'
+$treeLayoutB = Test-Path -LiteralPath $payloadZip -PathType Leaf
+if ($treeLayoutB) {
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Bundle incomplete: bundle.json missing under $BundleDir."
+    }
+} else {
+    foreach ($part in @('node\node.exe', 'dsh\@deepseek-ai\dsh\package.json')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $BundleDir $part) -PathType Leaf)) {
+            throw "Bundle incomplete: $part missing under $BundleDir (rebuild with scripts\Build-Bundle.ps1)."
+        }
     }
 }
 if (-not [Environment]::Is64BitOperatingSystem) { throw 'This bundle targets Windows x64 only.' }
@@ -117,9 +130,36 @@ function Sync-Dir([string]$src, [string]$dst) {
     & robocopy.exe $src $dst /MIR /NFL /NDL /NJH /NJS /NP /R:2 /W:1 | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE) copying $src -> $dst" }
 }
-Sync-Dir (Join-Path $BundleDir 'node') (Join-Path $TargetRoot 'node')
-Sync-Dir (Join-Path $BundleDir 'dsh') (Join-Path $TargetRoot 'dsh')
-Write-Host "[offline] node + dsh tree -> $TargetRoot"
+if (-not $treeLayoutB) {
+    # Layout A (portable zip): the trees sit unpacked next to this script.
+    Sync-Dir (Join-Path $BundleDir 'node') (Join-Path $TargetRoot 'node')
+    Sync-Dir (Join-Path $BundleDir 'dsh') (Join-Path $TargetRoot 'dsh')
+    Write-Host "[offline] node + dsh tree -> $TargetRoot"
+} else {
+    # Layout B: one archive, one pass. Drop stale trees first so files removed
+    # in a newer bundle do not linger (mirrors robocopy /MIR semantics).
+    [System.IO.Directory]::CreateDirectory($TargetRoot) | Out-Null
+    foreach ($rel in @('node', 'dsh', 'profile-web', 'wsl')) {
+        $old = Join-Path $TargetRoot $rel
+        if (Test-Path -LiteralPath $old) {
+            try { Remove-Item -LiteralPath $old -Recurse -Force }
+            catch { Write-Warning "[offline] could not remove stale $old ($($_.Exception.Message))" }
+        }
+    }
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    [System.IO.Directory]::CreateDirectory($TargetRoot) | Out-Null
+    if (Test-Path -LiteralPath $tar -PathType Leaf) {
+        & $tar -xf $payloadZip -C $TargetRoot
+        if ($LASTEXITCODE -ne 0) { throw "payload extraction failed (tar exit $LASTEXITCODE): $payloadZip -> $TargetRoot" }
+    } elseif (Get-Command Expand-Archive -ErrorAction SilentlyContinue) {
+        # Very old Win10 without tar.exe: PowerShell zip fallback (slower).
+        Expand-Archive -LiteralPath $payloadZip -DestinationPath $TargetRoot -Force
+    } else {
+        throw 'Neither System32\tar.exe nor Expand-Archive is available to unpack payload.zip.'
+    }
+    try { Remove-Item -LiteralPath $payloadZip -Force -ErrorAction SilentlyContinue } catch { }
+    Write-Host "[offline] payload extracted (node+dsh+profile-web+wsl) -> $TargetRoot (single archive pass)"
+}
 
 # ---------- 2. dsh.cmd shim (absolute paths into the installed tree) ----------
 $dshPkg = Get-Content -LiteralPath (Join-Path $TargetRoot 'dsh\@deepseek-ai\dsh\package.json') -Raw | ConvertFrom-Json
@@ -159,7 +199,7 @@ if (-not $NoPath) {
 }
 
 # ---------- 4. Pre-baked profile -> ~/.dsh (sandbox-aware) ----------
-$profileSrc = Join-Path $BundleDir 'profile-web'
+$profileSrc = if ($treeLayoutB) { Join-Path $TargetRoot 'profile-web' } else { Join-Path $BundleDir 'profile-web' }
 if (Test-Path -LiteralPath $profileSrc) {
     # Sandbox testing (TESTING.md): never touch the real %USERPROFILE%\.dsh.
     $dshHome = if ($sandboxHome) { Join-Path $sandboxHome '.dsh' } else { Join-Path $env:USERPROFILE '.dsh' }
@@ -226,7 +266,7 @@ if (-not $SkipManager) {
 
 # ---------- 5b. WSL side (optional; needs bundle\wsl\ payload + wsl.exe) ----------
 $wslInstalledDistro = ''
-$wslPayload = Join-Path $BundleDir 'wsl'
+$wslPayload = if ($treeLayoutB) { Join-Path $TargetRoot 'wsl' } else { Join-Path $BundleDir 'wsl' }
 $wslWanted = $false
 if ($SkipWsl) {
     Write-Host '[offline] -SkipWsl: WSL side untouched'
