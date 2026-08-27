@@ -34,6 +34,15 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; decompression); /normal keeps the solid LZMA2 win with ~4x faster unpack at a
 ; modest +10-15% setup size.
 Compression=lzma2/normal
+; Inno replaces existing {app} files by renaming them first; a running tray
+; manager / dsh web holds those files (v3.9.3 hard-links dsh-bundle to {app},
+; so the OLD dsh shares inodes with the tree being replaced) and the rename
+; fails with "尝试重命名...文件时出错". We quit the old stack in
+; [Code] InitializeSetup BEFORE Inno extracts; these directives add a second
+; line of defense for any other window-holding process.
+CloseApplications=yes
+RestartApplications=no
+SetupLogging=yes
 SolidCompression=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
@@ -69,3 +78,28 @@ Filename: "powershell.exe"; \
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+
+[Code]
+{ Gracefully stop the PREVIOUS tray manager (and the dsh backends it owns)
+  BEFORE Inno extracts over the app dir. This is what makes the upgrade safe
+  when the old dsh / dsh-bundle files are still open: 'exit' is a control
+  action the manager forwards to its running primary instance, which then
+  shuts down its services and exits. On a fresh machine there is nothing to
+  stop and the action is a no-op. A short sleep lets the manager finish its
+  bridge shutdown before extraction starts renaming files. }
+function InitializeSetup(): Boolean;
+var
+  ManagerExe: String;
+  ErrorCode: Integer;
+begin
+  Result := True;
+  ManagerExe := ExpandConstant('{localappdata}\dsh-web-manager\app\dsh-web-manager.exe');
+  if FileExists(ManagerExe) then
+  begin
+    if ShellExec('open', ManagerExe, 'exit', '', SW_HIDE, ewNoWait, ErrorCode) then
+      Sleep(5000)   { give the old manager time to stop its services + exit }
+    else
+      { non-fatal: extraction will simply retry/fail loudly if really locked }
+      Log('InitializeSetup: could not stop previous manager (code ' + IntToStr(ErrorCode) + ')');
+  end;
+end;
