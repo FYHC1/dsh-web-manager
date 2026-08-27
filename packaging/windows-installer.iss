@@ -80,26 +80,55 @@ Filename: "powershell.exe"; \
 Type: filesandordirs; Name: "{app}"
 
 [Code]
-{ Gracefully stop the PREVIOUS tray manager (and the dsh backends it owns)
-  BEFORE Inno extracts over the app dir. This is what makes the upgrade safe
-  when the old dsh / dsh-bundle files are still open: 'exit' is a control
-  action the manager forwards to its running primary instance, which then
-  shuts down its services and exits. On a fresh machine there is nothing to
-  stop and the action is a no-op. A short sleep lets the manager finish its
-  bridge shutdown before extraction starts renaming files. }
-function InitializeSetup(): Boolean;
+{ Replacing files in place trips Inno's rename-first strategy: as long as the
+  old app dir still exists, Inno renames each existing file before writing the
+  new one, and any remaining open handle (previous tray manager / dsh web, or
+  a transient AV scan) fails that rename with "尝试重命名...文件时出错".
+  Before extraction we therefore (1) gracefully quit the previous tray manager
+  and WAIT until its process is gone (its dsh backends stop with it), then
+  (2) delete the OLD app dir entirely so Inno extracts into an EMPTY directory
+  and never has to rename an existing file. Both steps are best-effort: if
+  they fail (e.g. a directory still locked), extraction falls back to in-place
+  replacement and Inno's own retry dialog is the last line of defence. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  ManagerExe: String;
-  ErrorCode: Integer;
+  ManagerExe, AppDir, Script: String;
+  Rc: Integer;
+  Attempt: Integer;
 begin
-  Result := True;
+  Result := '';   // '' = continue installation; non-empty aborts with the message
+
+  // (1) quit the previous tray manager; poll up to ~40s for it + backends exit.
   ManagerExe := ExpandConstant('{localappdata}\dsh-web-manager\app\dsh-web-manager.exe');
-  if FileExists(ManagerExe) then
-  begin
-    if ShellExec('open', ManagerExe, 'exit', '', SW_HIDE, ewNoWait, ErrorCode) then
-      Sleep(5000)   { give the old manager time to stop its services + exit }
+  AppDir := ExpandConstant('{app}');
+  if FileExists(ManagerExe) then begin
+    Script := ExpandConstant('{tmp}\stop-old-stack.cmd');
+    SaveStringToFile(Script,
+      '@echo off' + #13#10 +
+      'if not exist "%LOCALAPPDATA%\dsh-web-manager\app\dsh-web-manager.exe" exit /b 0' + #13#10 +
+      '"%LOCALAPPDATA%\dsh-web-manager\app\dsh-web-manager.exe" exit' + #13#10 +
+      'for /l %%i in (1,1,20) do (' + #13#10 +
+      '  tasklist /FI "IMAGENAME eq dsh-web-manager.exe" 2>nul | find /i "dsh-web-manager.exe" >nul || exit /b 0' + #13#10 +
+      '  timeout /t 2 /nobreak >nul' + #13#10 +
+      ')' + #13#10 +
+      'exit /b 0',
+      True);
+    Exec(ExpandConstant('{cmd}'), '/d /s /c ""' + Script + '""', '', SW_HIDE,
+         ewWaitUntilTerminated, Rc);
+    Log('PrepareToInstall: quit previous manager (exit ' + IntToStr(Rc) + ')');
+  end;
+
+  // (2) remove the OLD app dir so extraction starts empty (no renames at all).
+  if DirExists(AppDir) then begin
+    for Attempt := 1 to 4 do begin
+      Exec(ExpandConstant('{cmd}'), '/d /s /c "rmdir /s /q ""' + AppDir + '"""', '',
+           SW_HIDE, ewWaitUntilTerminated, Rc);
+      if (Rc = 0) or (not DirExists(AppDir)) then break;
+      Sleep(2000);   { wait out a transient AV/dir lock, then retry }
+    end;
+    if Rc <> 0 then
+      Log('PrepareToInstall: could not remove old app dir (code ' + IntToStr(Rc) + '); extracting in place')
     else
-      { non-fatal: extraction will simply retry/fail loudly if really locked }
-      Log('InitializeSetup: could not stop previous manager (code ' + IntToStr(ErrorCode) + ')');
+      Log('PrepareToInstall: old app dir removed; extraction starts from an empty directory');
   end;
 end;
