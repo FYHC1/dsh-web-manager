@@ -72,8 +72,48 @@ if ($wv2Ok) { Write-Host '[offline] WebView2 Runtime: present (embedded window b
 else { Write-Warning '[offline] WebView2 Runtime not found: the tray manager will fall back to Edge app windows (taskbar shows the Edge icon).' }
 
 # ---------- 1. Portable node + dsh tree ----------
+# Same-volume fast path: hard-link the (immutable-at-runtime) node/dsh trees
+# from the extracted bundle instead of copying ~1.4 GB twice. Falls back to
+# robocopy /MIR on any failure (cross-volume, reparse points, locked files).
 function Sync-Dir([string]$src, [string]$dst) {
     if (-not (Test-Path -LiteralPath $src)) { throw "Bundle component missing: $src" }
+    $srcAbs = (Resolve-Path -LiteralPath $src).Path
+    $srcRoot = [System.IO.Path]::GetPathRoot($srcAbs)
+    $dstAbs = [System.IO.Path]::GetFullPath($dst)
+    $dstRoot = [System.IO.Path]::GetPathRoot($dstAbs)
+    if ($srcRoot -ieq $dstRoot) {
+        try {
+            if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Recurse -Force }
+            [System.IO.Directory]::CreateDirectory($dstAbs) | Out-Null
+            # Breadth-first walk creating one hard link per file; directories are
+            # never linked (only files). Any reparse point (junction/symlink) in
+            # the source aborts the pass so the robocopy fallback handles it.
+            $queue = New-Object System.Collections.Generic.Queue[string]
+            $queue.Enqueue($srcAbs)
+            while ($queue.Count -gt 0) {
+                $dir = $queue.Dequeue()
+                foreach ($sub in @(Get-ChildItem -LiteralPath $dir -Directory -Force -ErrorAction Stop)) {
+                    $rel = $sub.FullName.Substring($srcAbs.Length).TrimStart('\')
+                    [System.IO.Directory]::CreateDirectory((Join-Path $dstAbs $rel)) | Out-Null
+                    $queue.Enqueue($sub.FullName)
+                }
+                foreach ($f in @(Get-ChildItem -LiteralPath $dir -File -Force -ErrorAction Stop)) {
+                    if ($f.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                        throw 'reparse point in source tree; using copy fallback'
+                    }
+                    $link = Join-Path $dstAbs $f.FullName.Substring($srcAbs.Length).TrimStart('\')
+                    $null = New-Item -ItemType HardLink -Path $link -Target $f.FullName -Force
+                }
+            }
+            Write-Host "[offline] linked $src -> $dst (hard links, same volume)"
+            return
+        } catch {
+            Write-Warning "[offline] hard-link pass failed ($($_.Exception.Message)); falling back to robocopy"
+            if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Recurse -Force }
+        }
+    } else {
+        Write-Host "[offline] $src and $dst on different volumes; copying"
+    }
     & robocopy.exe $src $dst /MIR /NFL /NDL /NJH /NJS /NP /R:2 /W:1 | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE) copying $src -> $dst" }
 }

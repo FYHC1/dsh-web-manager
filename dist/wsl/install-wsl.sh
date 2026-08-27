@@ -73,10 +73,15 @@ DSH_REL_ENTRY="$("$SRC/node/bin/node" -e "const b=require('$DSH_PKG_JSON').bin; 
 # ---------- 1. Portable tree ----------
 if [ "$SKIP_TREE" != "1" ]; then
   mkdir -p "$PREFIX"
-  log "copying portable tree -> $PREFIX (this can take a few minutes)"
+  # Single-stream tar pipe instead of `cp -a`: the payload usually sits on a 9P
+  # mount (/mnt/c from the Windows installer). `cp -a` of the ~100k-file dsh
+  # tree pays a per-file 9P round-trip (minutes); tarballing reads it as ONE
+  # sequential stream, then extraction writes straight to ext4. Modes and
+  # symlinks are preserved by the tar format (no dereferencing).
+  log "copying portable tree -> $PREFIX (single-stream tar)"
   rm -rf "$PREFIX/node" "$PREFIX/dsh"
-  cp -a "$SRC/node" "$PREFIX/node"
-  cp -a "$SRC/dsh" "$PREFIX/dsh"
+  tar -C "$SRC" -cf - node | tar -C "$PREFIX" -xf -
+  tar -C "$SRC" -cf - dsh   | tar -C "$PREFIX" -xf -
 else
   log "using payload in place at $PREFIX (--skip-tree)"
 fi

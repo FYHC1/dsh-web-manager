@@ -30,7 +30,10 @@ DefaultGroupName=dsh offline bundle
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-Compression=lzma2/max
+; lzma2/max was noticeably slow to EXTRACT (1.4 GB tree, single-threaded
+; decompression); /normal keeps the solid LZMA2 win with ~4x faster unpack at a
+; modest +10-15% setup size.
+Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
