@@ -274,6 +274,18 @@ if (-not $SkipProfile) {
 
     if (Test-Path -LiteralPath $profileDir) { Remove-Item -LiteralPath $profileDir -Recurse -Force }
     Move-Item -LiteralPath (Join-Path $bakeHome '.dsh') -Destination $profileDir
+    # Strip the profiles/node_modules tree: it was created during the bake as
+    # regular directories, but dsh on Windows expects symlinks here (via
+    # healProfilesModuleFallback). On a target machine without Developer Mode
+    # the symlinks cannot be created, but dsh fails with a hard error when
+    # regular directories exist instead. Leaving the tree out lets dsh
+    # recreate the symlinks on first startup (which Node.js fs.symlinkSync
+    # manages on Windows >= 10.0.14972 with Developer Mode, or via UAC).
+    $stripNodeModules = Join-Path $profileDir 'profiles\node_modules'
+    if (Test-Path -LiteralPath $stripNodeModules) {
+        Remove-Item -LiteralPath $stripNodeModules -Recurse -Force
+        Write-Host "[bundle] profile: stripped profiles/node_modules (dsh recreates symlinks on first startup)"
+    }
     Remove-Item -LiteralPath $bakeHome -Recurse -Force
     Write-Host "[bundle] profile baked -> $profileDir (offline start verified)"
 }

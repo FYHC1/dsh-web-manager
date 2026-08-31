@@ -85,8 +85,8 @@ Filename: "powershell.exe"; \
   Flags: postinstall skipifsilent runhidden runasoriginaluser
 
 [UninstallRun]
-Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Uninstall-Offline.ps1"""; \
+Filename: "{cmd}"; \
+  Parameters: "/d /s /c ""if exist ""{app}\Uninstall-Offline.ps1"" (powershell -NoProfile -ExecutionPolicy Bypass -File ""{app}\Uninstall-Offline.ps1"")"""; \
   RunOnceId: "UninstallOffline"; Flags: runhidden
 
 [UninstallDelete]
