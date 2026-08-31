@@ -88,8 +88,9 @@ jobs:
           -WslPayloadDir "bundle-out\bundle-wsl"
       - name: Assemble setup payload (single-archive staging)
         # The setup EXE ships the heavy trees (node/dsh/profile-web/wsl) as ONE
-        # payload.zip instead of ~200k Inno [Files] entries - Install-Offline.ps1
-        # streams it to the final root with the system tar (see Prepare-Setup.ps1).
+        # stored payload.tar (Inno lzma2-compresses it) instead of ~200k Inno
+        # [Files] entries - Install-Offline.ps1 streams it to the final root
+        # with the system tar (see Prepare-Setup.ps1).
         run: >
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Prepare-Setup.ps1
           -BundleDir "bundle-out\dsh-offline-bundle"
@@ -110,7 +111,7 @@ jobs:
         # Inno Setup cannot open source files with paths > MAX_PATH (260 chars).
         # The npm/pnpm trees go deeper than that under the repo checkout, so Inno
         # aborts with "cannot find the path specified" on the first file past the
-        # limit. Copy the SETUP STAGE (small files + one payload.zip) to a short
+        # limit. Copy the SETUP STAGE (small files + one payload.tar) to a short
         # root so every source path stays under 260. Verified locally with Inno
         # 6.7.3: a 270-char source path fails, a 228-char one compiles.
         # NOTE: must run under pwsh — `shell: powershell` maps to Windows

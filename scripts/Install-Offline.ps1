@@ -54,11 +54,16 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
 }
 # Two delivery layouts share this installer:
 #   Layout B (exe setup): heavy trees (node/dsh/profile-web/wsl) travel as ONE
-#     payload.zip; Install-Offline extracts it straight to $TargetRoot with
-#     the system tar (single stream, no per-file copy).
+#     payload archive (payload.tar stored, lzma2-compressed inside the setup
+#     by Inno; legacy bundles carry payload.zip). Install-Offline extracts it
+#     straight to $TargetRoot with the system tar (single stream, no per-file
+#     copy).
 #   Layout A (portable zip): the trees sit unpacked beside this script.
-$payloadZip = Join-Path $BundleDir 'payload.zip'
-$treeLayoutB = Test-Path -LiteralPath $payloadZip -PathType Leaf
+$payloadArchive = Join-Path $BundleDir 'payload.tar'
+if (-not (Test-Path -LiteralPath $payloadArchive -PathType Leaf)) {
+    $payloadArchive = Join-Path $BundleDir 'payload.zip'
+}
+$treeLayoutB = Test-Path -LiteralPath $payloadArchive -PathType Leaf
 if ($treeLayoutB) {
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         throw "Bundle incomplete: bundle.json missing under $BundleDir."
@@ -147,17 +152,18 @@ if (-not $treeLayoutB) {
         }
     }
     $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    [System.IO.Directory]::CreateDirectory($TargetRoot) | Out-Null
+    $isZip = $payloadArchive.EndsWith('.zip', [StringComparison]::OrdinalIgnoreCase)
     if (Test-Path -LiteralPath $tar -PathType Leaf) {
-        & $tar -xf $payloadZip -C $TargetRoot
-        if ($LASTEXITCODE -ne 0) { throw "payload extraction failed (tar exit $LASTEXITCODE): $payloadZip -> $TargetRoot" }
-    } elseif (Get-Command Expand-Archive -ErrorAction SilentlyContinue) {
+        # bsdtar auto-detects the container (tar / zip) from the content.
+        & $tar -xf $payloadArchive -C $TargetRoot
+        if ($LASTEXITCODE -ne 0) { throw "payload extraction failed (tar exit $LASTEXITCODE): $payloadArchive -> $TargetRoot" }
+    } elseif ($isZip -and (Get-Command Expand-Archive -ErrorAction SilentlyContinue)) {
         # Very old Win10 without tar.exe: PowerShell zip fallback (slower).
-        Expand-Archive -LiteralPath $payloadZip -DestinationPath $TargetRoot -Force
+        Expand-Archive -LiteralPath $payloadArchive -DestinationPath $TargetRoot -Force
     } else {
-        throw 'Neither System32\tar.exe nor Expand-Archive is available to unpack payload.zip.'
+        throw 'System32\tar.exe is required to unpack the payload archive and is missing on this machine.'
     }
-    try { Remove-Item -LiteralPath $payloadZip -Force -ErrorAction SilentlyContinue } catch { }
+    try { Remove-Item -LiteralPath $payloadArchive -Force -ErrorAction SilentlyContinue } catch { }
     Write-Host "[offline] payload extracted (node+dsh+profile-web+wsl) -> $TargetRoot (single archive pass)"
 }
 

@@ -62,12 +62,16 @@ Name: "zh"; MessagesFile: "innosetup\ChineseSimplified.isl"
 zh.WelcomeLabel2=这将把离线一体化包（便携 Node + dsh + 预烘焙 profile + dsh web manager 托盘）安装到您的电脑。%n%n继续之前请关闭其他应用程序。
 
 [Files]
-; The ~200k-file heavy trees (node/dsh/profile-web/wsl) travel as ONE archive
-; (payload.zip, already deflate-compressed) so Inno + the AV stack chew on a
-; single stream; Install-Offline.ps1 unpacks it straight to the final install
-; root with the system tar. nocompression: double-compressing the zip gains
-; little and a decode pass only slows the install down.
+; The ~200k-file heavy trees (node/dsh/profile-web/wsl) travel as ONE stored
+; payload.tar; Inno's solid lzma2 compresses it (this is what halves the setup
+; size vs the old stored-zip variant). Install-Offline.ps1 unpacks it straight
+; to the final install root with the system tar. The legacy payload.zip branch
+; keeps old stages buildable; a zip is already compressed, hence nocompression.
+#if FileExists(AddBackslash(BundleDir) + "payload.tar")
+Source: "{#BundleDir}\payload.tar"; DestDir: "{app}"
+#else
 Source: "{#BundleDir}\payload.zip"; DestDir: "{app}"; Flags: nocompression
+#endif
 Source: "{#BundleDir}\dsh-web-manager\*"; DestDir: "{app}\dsh-web-manager"; Flags: recursesubdirs createallsubdirs
 Source: "{#BundleDir}\Install-Offline.ps1"; DestDir: "{app}"
 Source: "{#BundleDir}\Uninstall-Offline.ps1"; DestDir: "{app}"
@@ -78,7 +82,7 @@ Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Install-Offline.ps1"" -BundleDir ""{app}"""; \
   WorkingDir: "{app}"; \
   Description: "{cm:LaunchProgram,dsh offline bundle}（安装到本机并启动托盘管理器）"; \
-  Flags: postinstall skipifsilent runasoriginaluser
+  Flags: postinstall skipifsilent runhidden runasoriginaluser
 
 [UninstallRun]
 Filename: "powershell.exe"; \

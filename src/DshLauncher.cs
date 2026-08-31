@@ -33,6 +33,13 @@ namespace DshWebManager
                 candidates.Add(Path.Combine(programFiles, "nvm", "nodejs", "dsh.cmd"));
             if (!String.IsNullOrEmpty(home))
                 candidates.Add(Path.Combine(home, "AppData", "Roaming", "npm", "dsh.cmd"));
+            // 3. Offline-bundle layout fallback: Install-Offline.ps1 always places
+            // the shim at %LOCALAPPDATA%\dsh-bundle\bin\dsh.cmd. Covers installs
+            // whose config.json lost the DshCommand pin (e.g. the v3.9.4 ordering
+            // bug) — the bundled dsh still resolves without any config at all.
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!String.IsNullOrEmpty(localAppData))
+                candidates.Add(Path.Combine(localAppData, "dsh-bundle", "bin", "dsh.cmd"));
             foreach (string c in candidates)
                 if (!String.IsNullOrEmpty(c) && File.Exists(c)) return c;
             return null;
