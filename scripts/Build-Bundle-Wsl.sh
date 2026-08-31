@@ -213,7 +213,7 @@ fi
 PROFILE_DIR="$BUNDLE/profile-web"
 rm -rf "$PROFILE_DIR"
 mv "$BAKE_HOME/.dsh" "$PROFILE_DIR"
-rm -rf "$BAKE_HOME"
+rm -rf "$BAKE_HOME" 2>/dev/null || true
 log "profile baked -> $PROFILE_DIR (offline start verified)"
 
 # ---------- 5. Installer + manifest ----------
