@@ -29,6 +29,7 @@ param(
     [switch]$SkipManager,   # node+dsh+profile only (no tray app)
     [switch]$WithWsl,       # force the WSL-side install (error when the payload is absent)
     [switch]$SkipWsl,       # never touch WSL, even when the payload is embedded
+    [switch]$NoProgressUI,  # no WinForms progress window (console-only runs)
     [string]$WslDistro = '' # target distro; empty = auto-detect (prefer a running, non-helper distro)
 )
 
@@ -45,12 +46,155 @@ if (-not $TargetRoot) { $TargetRoot = Join-Path $env:LOCALAPPDATA 'dsh-bundle' }
 # inside that home instead of the real user profile.
 $sandboxHome = $env:DSH_WEB_MANAGER_HOME
 
+# ---------- Observability: transcript log + progress UI + error popup ----------
+# The setup runs this script with a HIDDEN console (Inno runhidden): without a
+# visible surface the user cannot tell the install is running (and may kill
+# it), and a failure is completely silent. So:
+#   1. every line goes to a transcript under %LOCALAPPDATA%\dsh-web-manager\logs
+#   2. a small WinForms progress window shows status (unless -NoProgressUI)
+#   3. a fatal error pops a MessageBox pointing at the log (visible even hidden)
+# Background: on machines with 360/Huorong-style security suites a hidden
+# PowerShell doing mass file I/O was observed being terminated mid-install
+# (exit 0x40010004), leaving a half-extracted bundle; the visible window makes
+# the process legible and lets the user approve any security prompt.
+$installLogDir = if ($sandboxHome) { Join-Path $sandboxHome 'AppData\Local\dsh-web-manager\logs' } else { Join-Path $env:LOCALAPPDATA 'dsh-web-manager\logs' }
+try { [System.IO.Directory]::CreateDirectory($installLogDir) | Out-Null } catch {}
+$installLog = Join-Path $installLogDir 'install-offline.log'
+$script:TranscriptOn = $false
+try {
+    if (Test-Path -LiteralPath $installLog -PathType Leaf) {
+        Move-Item -LiteralPath $installLog -Destination ($installLog + '.old') -Force -ErrorAction SilentlyContinue
+    }
+    Start-Transcript -Path $installLog -Force | Out-Null
+    $script:TranscriptOn = $true
+} catch { Write-Warning ('[offline] transcript log unavailable: ' + $_.Exception.Message) }
+
+# Progress window on a background STA runspace; the main install thread feeds
+# it through the synchronized hashtable. Any UI failure degrades to headless.
+$script:UI = $null
+function Start-InstallProgressUI {
+    if ($NoProgressUI -or $sandboxHome) { return }
+    try {
+        $sync = [hashtable]::Synchronized(@{
+            Status = 'Preparing to install…'
+            Done   = $false
+            Lines  = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
+        })
+        # STA for WinForms: set on the InitialSessionState (the direct
+        # CreateRunspace(ApartmentState) overloads bind ambiguously in PS 5.1).
+        $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+        $iss.ApartmentState = [System.Threading.ApartmentState]::STA
+        $rs = [runspacefactory]::CreateRunspace($iss)
+        $rs.Open()
+        $rs.SessionStateProxy.SetVariable('UISync', $sync)
+        $ui = [powershell]::Create()
+        $ui.Runspace = $rs
+        [void]$ui.AddScript(@'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$f = New-Object System.Windows.Forms.Form
+$f.Text = 'dsh offline bundle installer'
+$f.Size = New-Object System.Drawing.Size(600, 340)
+$f.StartPosition = 'CenterScreen'
+$f.FormBorderStyle = 'FixedDialog'
+$f.MaximizeBox = $false
+$f.MinimizeBox = $false
+$lbl = New-Object System.Windows.Forms.Label
+$lbl.Location = New-Object System.Drawing.Point(16, 16); $lbl.Size = New-Object System.Drawing.Size(556, 36)
+$lbl.Font = New-Object System.Drawing.Font($lbl.Font, [System.Drawing.FontStyle]::Bold)
+$f.Controls.Add($lbl)
+$bar = New-Object System.Windows.Forms.ProgressBar
+$bar.Location = New-Object System.Drawing.Point(16, 58); $bar.Size = New-Object System.Drawing.Size(556, 20)
+$bar.Style = 'Marquee'
+$f.Controls.Add($bar)
+$list = New-Object System.Windows.Forms.ListBox
+$list.Location = New-Object System.Drawing.Point(16, 90); $list.Size = New-Object System.Drawing.Size(556, 158)
+$f.Controls.Add($list)
+$hint = New-Object System.Windows.Forms.Label
+$hint.Location = New-Object System.Drawing.Point(16, 256); $hint.Size = New-Object System.Drawing.Size(556, 34)
+$hint.ForeColor = [System.Drawing.Color]::Gray
+$hint.Text = 'Installing, please do not close this window. If your security software (360 / Huorong etc.) prompts, please allow this installer.'
+$f.Controls.Add($hint)
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 300
+$timer.Add_Tick({
+    try {
+        $lbl.Text = $UISync.Status
+        while ($UISync.Lines.Count -gt 0) {
+            $item = $UISync.Lines[0]
+            $UISync.Lines.RemoveAt(0)
+            [void]$list.Items.Add($item)
+            while ($list.Items.Count -gt 200) { $list.Items.RemoveAt(0) }
+            $list.TopIndex = $list.Items.Count - 1
+        }
+        if ($UISync.Done) { $timer.Stop(); $f.Close() }
+    } catch {}
+})
+$timer.Start()
+[void]$f.ShowDialog()
+'@)
+        [void]$ui.BeginInvoke()
+        $script:UI = @{ Sync = $sync; PS = $ui; RS = $rs }
+    } catch {
+        Write-Warning ('[offline] progress UI unavailable: ' + $_.Exception.Message)
+        $script:UI = $null
+    }
+}
+function Write-Status([string]$msg) {
+    Write-Host $msg
+    if ($script:UI) {
+        try {
+            $script:UI.Sync.Status = $msg
+            [void]$script:UI.Sync.Lines.Add($msg)
+        } catch {}
+    }
+}
+function Stop-InstallProgressUI([string]$finalStatus) {
+    if (-not $script:UI) { return }
+    try {
+        $script:UI.Sync.Status = $finalStatus
+        [void]$script:UI.Sync.Lines.Add($finalStatus)
+        $script:UI.Sync.Done = $true
+        Start-Sleep -Milliseconds 800
+    } catch {}
+    try { $script:UI.PS.Stop() } catch {}
+    try { $script:UI.PS.Dispose() } catch {}
+    try { $script:UI.RS.Close() } catch {}
+    $script:UI = $null
+}
+function Stop-InstallTranscript {
+    if ($script:TranscriptOn) { try { Stop-Transcript | Out-Null } catch {} ; $script:TranscriptOn = $false }
+}
+
+# Fatal-error surface: a MessageBox works even when the console is hidden.
+trap {
+    $errMsg = $_.Exception.Message
+    Write-Host ('[offline] INSTALL FAILED: ' + $errMsg)
+    Stop-InstallProgressUI ('Install failed: ' + $errMsg)
+    if (-not $sandboxHome) {
+        try {
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.MessageBox]::Show(
+                'dsh offline bundle install failed:' + [Environment]::NewLine + $errMsg +
+                [Environment]::NewLine + [Environment]::NewLine +
+                'If your security software (360 / Huorong etc.) blocked the installer, allow it and run the setup again (the installer repairs partial installs).' +
+                [Environment]::NewLine + 'Log: ' + $installLog,
+                'dsh offline bundle', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        } catch {}
+    }
+    Stop-InstallTranscript
+    exit 1
+}
+
+Start-InstallProgressUI
+Write-Status '[offline] starting offline install'
+
 # ---------- 0. Preflight ----------
 $manifestPath = Join-Path $BundleDir 'bundle.json'
 $manifest = $null
 if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    Write-Host "[offline] bundle: v$($manifest.BundleVersion) node=$($manifest.Node.Version) dsh=$($manifest.Dsh.Version) manager=$($manifest.Manager.Version)"
+    Write-Status "[offline] bundle: v$($manifest.BundleVersion) node=$($manifest.Node.Version) dsh=$($manifest.Dsh.Version) manager=$($manifest.Manager.Version)"
 }
 # Two delivery layouts share this installer:
 #   Layout B (exe setup): heavy trees (node/dsh/profile-web/wsl) travel as ONE
@@ -86,7 +230,7 @@ foreach ($probe in @(
     'HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}')) {
     if (Test-Path -LiteralPath $probe) { $wv2Ok = $true; break }
 }
-if ($wv2Ok) { Write-Host '[offline] WebView2 Runtime: present (embedded window backend active)' }
+if ($wv2Ok) { Write-Status '[offline] WebView2 Runtime: present (embedded window backend active)' }
 else { Write-Warning '[offline] WebView2 Runtime not found: the tray manager will fall back to Edge app windows (taskbar shows the Edge icon).' }
 
 # ---------- 1. Portable node + dsh tree ----------
@@ -123,14 +267,14 @@ function Sync-Dir([string]$src, [string]$dst) {
                     $null = New-Item -ItemType HardLink -Path $link -Target $f.FullName -Force
                 }
             }
-            Write-Host "[offline] linked $src -> $dst (hard links, same volume)"
+            Write-Status "[offline] linked $src -> $dst (hard links, same volume)"
             return
         } catch {
             Write-Warning "[offline] hard-link pass failed ($($_.Exception.Message)); falling back to robocopy"
             if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Recurse -Force }
         }
     } else {
-        Write-Host "[offline] $src and $dst on different volumes; copying"
+        Write-Status "[offline] $src and $dst on different volumes; copying"
     }
     & robocopy.exe $src $dst /MIR /NFL /NDL /NJH /NJS /NP /R:2 /W:1 | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE) copying $src -> $dst" }
@@ -139,7 +283,7 @@ if (-not $treeLayoutB) {
     # Layout A (portable zip): the trees sit unpacked next to this script.
     Sync-Dir (Join-Path $BundleDir 'node') (Join-Path $TargetRoot 'node')
     Sync-Dir (Join-Path $BundleDir 'dsh') (Join-Path $TargetRoot 'dsh')
-    Write-Host "[offline] node + dsh tree -> $TargetRoot"
+    Write-Status "[offline] node + dsh tree -> $TargetRoot"
 } else {
     # Layout B: one archive, one pass. Drop stale trees first so files removed
     # in a newer bundle do not linger (mirrors robocopy /MIR semantics).
@@ -164,7 +308,7 @@ if (-not $treeLayoutB) {
         throw 'System32\tar.exe is required to unpack the payload archive and is missing on this machine.'
     }
     try { Remove-Item -LiteralPath $payloadArchive -Force -ErrorAction SilentlyContinue } catch { }
-    Write-Host "[offline] payload extracted (node+dsh+profile-web+wsl) -> $TargetRoot (single archive pass)"
+    Write-Status "[offline] payload extracted (node+dsh+profile-web+wsl) -> $TargetRoot (single archive pass)"
 }
 
 # ---------- 2. dsh.cmd shim (absolute paths into the installed tree) ----------
@@ -179,7 +323,7 @@ $nodeExe = Join-Path $TargetRoot 'node\node.exe'
 $entryAbs = Join-Path (Join-Path $TargetRoot 'dsh\@deepseek-ai\dsh') $entry
 $cmdBody = "@echo off`r`nsetlocal`r`n`"$nodeExe`" `"$entryAbs`" %*`r`n"
 [System.IO.File]::WriteAllText($dshCmd, $cmdBody, (New-Object System.Text.ASCIIEncoding))
-Write-Host "[offline] shim: $dshCmd -> node $entry"
+Write-Status "[offline] shim: $dshCmd -> node $entry"
 
 # ---------- 3. User PATH (HKCU only; idempotent; type-preserving) ----------
 if (-not $NoPath) {
@@ -190,9 +334,9 @@ if (-not $NoPath) {
         $parts = @($cur -split ';' | Where-Object { $_ -ne '' })
         if ($parts -notcontains $binDir) {
             $envKey.SetValue('Path', ($parts + $binDir) -join ';', $kind)
-            Write-Host "[offline] user PATH += $binDir (new terminals only)"
+            Write-Status "[offline] user PATH += $binDir (new terminals only)"
         } else {
-            Write-Host '[offline] user PATH already contains the bundle bin dir'
+            Write-Status '[offline] user PATH already contains the bundle bin dir'
         }
         $envKey.Close()
         # Broadcast so new processes started from Explorer pick it up.
@@ -201,7 +345,7 @@ if (-not $NoPath) {
         [Win32.Native]::SendMessageTimeout([IntPtr]0xffff, 0x001A, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$result) | Out-Null
     }
 } else {
-    Write-Host '[offline] -NoPath: PATH untouched (the manager still works via DshCommand)'
+    Write-Status '[offline] -NoPath: PATH untouched (the manager still works via DshCommand)'
 }
 
 # ---------- 4. Pre-baked profile -> ~/.dsh (sandbox-aware) ----------
@@ -211,7 +355,7 @@ if (Test-Path -LiteralPath $profileSrc) {
     $dshHome = if ($sandboxHome) { Join-Path $sandboxHome '.dsh' } else { Join-Path $env:USERPROFILE '.dsh' }
     if (-not (Test-Path -LiteralPath $dshHome)) {
         Copy-Item -LiteralPath $profileSrc -Destination $dshHome -Recurse
-        Write-Host "[offline] profile installed -> $dshHome"
+        Write-Status "[offline] profile installed -> $dshHome"
     } else {
         # Existing .dsh: fill gaps only — never clobber the user's profiles,
         # settings or credentials (API keys are entered in the WebUI).
@@ -223,7 +367,7 @@ if (Test-Path -LiteralPath $profileSrc) {
                 Copy-Item -LiteralPath $_.FullName -Destination $dest
             }
         }
-        Write-Host "[offline] existing $dshHome kept; missing files filled from the bundle"
+        Write-Status "[offline] existing $dshHome kept; missing files filled from the bundle"
     }
 } else {
     Write-Warning '[offline] bundle has no profile-web\; first dsh start will initialize ~/.dsh itself'
@@ -251,16 +395,31 @@ if (-not $SkipManager) {
         if (Test-Path -LiteralPath $exe -PathType Leaf) {
             $oldV = (Get-Item -LiteralPath $exe).VersionInfo.FileVersion
             $newV = (Get-Item -LiteralPath $bundledExe).VersionInfo.FileVersion
-            if ((Compare-Version $oldV $newV) -ge 0) { $installIt = $false; Write-Host "[offline] sandbox manager v$oldV kept (bundle v$newV not newer)" }
+            if ((Compare-Version $oldV $newV) -ge 0) { $installIt = $false; Write-Status "[offline] sandbox manager v$oldV kept (bundle v$newV not newer)" }
         }
         if ($installIt) {
             [System.IO.Directory]::CreateDirectory($appRoot) | Out-Null
             Copy-Item -Path (Join-Path $BundleDir 'dsh-web-manager\*') -Destination $appRoot -Recurse -Force
-            Write-Host "[offline] sandbox manager -> $appRoot"
+            Write-Status "[offline] sandbox manager -> $appRoot"
         }
     } else {
         $installer = Join-Path $BundleDir 'dsh-web-manager\Install.ps1'
         if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Manager installer missing: $installer" }
+        # Stop a RUNNING tray manager before Install.ps1 overwrites its files:
+        # the exe (and its WebView2 DLLs) are locked while the process lives, and
+        # Copy-Item on a locked exe throws — with $ErrorActionPreference=Stop that
+        # aborted the whole install at the very last step. The control-pipe 'exit'
+        # action stops the manager gracefully (it stops its managed dsh too).
+        $existingMgr = Join-Path $env:LOCALAPPDATA 'dsh-web-manager\app\dsh-web-manager.exe'
+        if ((Test-Path -LiteralPath $existingMgr -PathType Leaf) -and
+            (Get-Process -Name 'dsh-web-manager' -ErrorAction SilentlyContinue)) {
+            Write-Status '[offline] stopping the running tray manager for the upgrade…'
+            Start-Process -FilePath $existingMgr -ArgumentList 'exit' -WindowStyle Hidden
+            for ($w = 0; $w -lt 30 -and (Get-Process -Name 'dsh-web-manager' -ErrorAction SilentlyContinue); $w++) { Start-Sleep 1 }
+            if (Get-Process -Name 'dsh-web-manager' -ErrorAction SilentlyContinue) {
+                Write-Warning '[offline] the tray manager is still running; Install.ps1 may fail on locked files'
+            }
+        }
         # -SourceDir is REQUIRED here: Install.ps1 defaults its source to
         # <parent-of-its-dir>\dist (repo layout). In the bundle it lives INSIDE
         # the dist copy, so the default resolves to a nonexistent ...\dist\dist.
@@ -301,7 +460,7 @@ if (-not ($config.PSObject.Properties['WindowBackend'])) {
 	    $config | Add-Member -MemberType NoteProperty -Name WindowBackend -Value 'auto'
 	}
 	$config | ConvertTo-Json -Depth 8 | ForEach-Object { [System.IO.File]::WriteAllText($configFile, $_, (New-Object System.Text.UTF8Encoding($false))) }
-Write-Host "[offline] config wired: DshCommand=$($config.DshCommand) WindowBackend=$($config.WindowBackend) ($configFile)"
+Write-Status "[offline] config wired: DshCommand=$($config.DshCommand) WindowBackend=$($config.WindowBackend) ($configFile)"
 
 # ---------- 5b. WSL side (optional; non-fatal) ----------
 # Runs AFTER the Windows config wiring so a WSL failure never blocks the
@@ -311,12 +470,12 @@ $wslInstalledDistro = ''
 $wslPayload = if ($treeLayoutB) { Join-Path $TargetRoot 'wsl' } else { Join-Path $BundleDir 'wsl' }
 $wslWanted = $false
 if ($SkipWsl) {
-    Write-Host '[offline] -SkipWsl: WSL side untouched'
+    Write-Status '[offline] -SkipWsl: WSL side untouched'
 } elseif ($WithWsl -or (Test-Path -LiteralPath (Join-Path $wslPayload 'install-wsl.sh') -PathType Leaf)) {
     $wslWanted = $true
 }
 if ($wslWanted -and $sandboxHome) {
-    Write-Host '[offline] sandbox mode: WSL side skipped (real distros only)'
+    Write-Status '[offline] sandbox mode: WSL side skipped (real distros only)'
     $wslWanted = $false
 }
 if ($wslWanted) {
@@ -329,7 +488,7 @@ if ($wslWanted) {
     $wslExe = Join-Path $env:SystemRoot 'System32\wsl.exe'
     if (-not (Test-Path -LiteralPath $wslExe -PathType Leaf)) {
         if ($WithWsl) { Write-Warning '[offline] -WithWsl given but wsl.exe not found; WSL side skipped' }
-        else { Write-Host '[offline] wsl.exe not found: WSL side skipped' }
+        else { Write-Status '[offline] wsl.exe not found: WSL side skipped' }
         $wslWanted = $false
     }
 }
@@ -362,17 +521,17 @@ if ($wslWanted) {
     }
     if (-not $distro) {
         if ($WithWsl) { Write-Warning '[offline] -WithWsl given but no WSL distro found; WSL side skipped' }
-        else { Write-Host '[offline] no WSL distro found: WSL side skipped' }
+        else { Write-Status '[offline] no WSL distro found: WSL side skipped' }
         $wslWanted = $false
     } else {
-        Write-Host "[offline] WSL target distro: $distro"
+        Write-Status "[offline] WSL target distro: $distro"
         $srcWsl = Convert-ToWslPath $wslPayload
         $inner = 'cp "' + $srcWsl + '/install-wsl.sh" /tmp/install-wsl.sh && bash /tmp/install-wsl.sh --src "' + $srcWsl + '" --prefix "$HOME/.dsh-bundle"'
         try {
             & $wslExe -d $distro -- bash -c $inner
             if ($LASTEXITCODE -eq 0) {
                 $wslInstalledDistro = $distro
-                Write-Host "[offline] WSL side installed into '$distro' (~/.dsh-bundle + ~/.local/bin/dsh + profile + companion scripts)"
+                Write-Status "[offline] WSL side installed into '$distro' (~/.dsh-bundle + ~/.local/bin/dsh + profile + companion scripts)"
                 # Remember the distro in config so the tray's WSL backend targets it.
                 if (Test-Path -LiteralPath $configFile -PathType Leaf) {
                     try {
@@ -400,32 +559,40 @@ if ($AutoStart -and -not $sandboxHome) {
     $runKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
     $runKey.SetValue('dsh-web-manager', '"' + (Join-Path $env:LOCALAPPDATA 'dsh-web-manager\app\dsh-web-manager.exe') + '" open')
     $runKey.Close()
-    Write-Host '[offline] autostart enabled (HKCU Run)'
+    Write-Status '[offline] autostart enabled (HKCU Run)'
 }
 
 # ---------- 8. Verify + launch ----------
 $nodeVer = & (Join-Path $TargetRoot 'node\node.exe') --version
-Write-Host "[offline] verify: portable node $nodeVer"
+Write-Status "[offline] verify: portable node $nodeVer"
 $dshVersion = & $dshCmd --version 2>$null
-if ($LASTEXITCODE -eq 0 -and $dshVersion) { Write-Host "[offline] verify: dsh $($dshVersion.Trim()) via $dshCmd" }
+if ($LASTEXITCODE -eq 0 -and $dshVersion) { Write-Status "[offline] verify: dsh $($dshVersion.Trim()) via $dshCmd" }
 else { Write-Warning "[offline] dsh --version via shim failed (exit $LASTEXITCODE) — inspect $dshCmd" }
 
 if (-not $SkipLaunch) {
     if ($sandboxHome) {
-        Write-Host '[offline] sandbox mode: not auto-launching the tray (start it manually with DSH_WEB_MANAGER_HOME set)'
+        Write-Status '[offline] sandbox mode: not auto-launching the tray (start it manually with DSH_WEB_MANAGER_HOME set)'
     } else {
         $exe = Join-Path $env:LOCALAPPDATA 'dsh-web-manager\app\dsh-web-manager.exe'
         if (Test-Path -LiteralPath $exe -PathType Leaf) {
             Start-Process -FilePath $exe -ArgumentList 'open' -WindowStyle Hidden
-            Write-Host '[offline] tray manager started (look for the whale icon).'
+            Write-Status '[offline] tray manager started (look for the whale icon).'
         }
     }
 }
 
 Write-Host ''
-Write-Host 'Offline install finished.'
+Write-Status 'Offline install finished.'
 Write-Host "  node/dsh tree : $TargetRoot"
 Write-Host "  dsh shim      : $dshCmd"
 $profileNote = if ($sandboxHome) { (Join-Path $sandboxHome '.dsh') } else { (Join-Path $env:USERPROFILE '.dsh') }
 Write-Host "  profile       : $profileNote"
 if (-not $sandboxHome) { Write-Host '  tray manager  : %LOCALAPPDATA%\dsh-web-manager\app (shortcuts on desktop/start menu)' }
+
+# Let the progress window show the final state, then shut everything down.
+Stop-InstallProgressUI 'Install finished — the tray manager is starting.'
+Stop-InstallTranscript
+# Explicit success exit code: a native command run earlier (e.g. the dsh shim
+# verify) leaves its exit code in $LASTEXITCODE, which would otherwise leak
+# out as the script's exit code and make Inno log a phantom failure.
+exit 0
