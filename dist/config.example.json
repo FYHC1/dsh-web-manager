@@ -15,7 +15,7 @@
   "WslDistro": "",
   "WslServiceMode": "wrapper",
   "Profile": "web",
-  "Version": "3.9.8",
+  "Version": "3.9.10",
   "WindowBackend": "auto",
   "DshCommand": ""
 }

@@ -292,6 +292,55 @@ if (-not $SkipProfile) {
             Write-Warning "[bundle] profile: could not patch .modules.yaml ($($_.Exception.Message))"
         }
     }
+    # The bake records the manager plugin as an absolute file: path (the CI
+    # checkout root). That path does not exist on a target machine, so the
+    # first `dsh plugin add/update` would fail to resolve it. Rewrite it to a
+    # path that resolves on every target: profiles/web -> ~/.dsh/manager-pkg,
+    # where Install-Offline.ps1 places the real manager plugin package.
+    $profilePkg = Join-Path $profileDir 'profiles\web\package.json'
+    if (Test-Path -LiteralPath $profilePkg -PathType Leaf) {
+        try {
+            $pkg = Get-Content -LiteralPath $profilePkg -Raw | ConvertFrom-Json
+            if ($pkg.dependencies.'dsh-web-manager') {
+                $pkg.dependencies.'dsh-web-manager' = 'file:../../manager-pkg'
+                $pkg | ConvertTo-Json -Depth 10 | ForEach-Object { [System.IO.File]::WriteAllText($profilePkg, $_, (New-Object System.Text.UTF8Encoding($false))) }
+                Write-Host '[bundle] profile: rewrote dsh-web-manager dep -> file:../../manager-pkg'
+            }
+        } catch {
+            Write-Warning "[bundle] profile: could not rewrite package.json file: dep ($($_.Exception.Message))"
+        }
+    }
+    # pnpm >= 10 blocks dependency build scripts (ERR_PNPM_IGNORED_BUILDS)
+    # unless approved. The bake leaves placeholder values in pnpm-workspace.yaml's
+    # allowBuilds list; approve them so plugins with native deps (ssh2,
+    # cloudflared, ...) install on the target without an interactive
+    # approve-builds step.
+    $profileWsYaml = Join-Path $profileDir 'profiles\web\pnpm-workspace.yaml'
+    if (Test-Path -LiteralPath $profileWsYaml -PathType Leaf) {
+        try {
+            $wsYaml = Get-Content -LiteralPath $profileWsYaml -Raw
+            $wsYaml = $wsYaml -replace '(\r?\n)(\s*)([\w][\w.\-]*):\s*set this to true or false', '$1$2$3: true'
+            [System.IO.File]::WriteAllText($profileWsYaml, $wsYaml, (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host '[bundle] profile: approved allowBuilds entries in pnpm-workspace.yaml'
+        } catch {
+            Write-Warning "[bundle] profile: could not approve allowBuilds ($($_.Exception.Message))"
+        }
+    }
+    # Ship the real manager plugin package (lib/ + dist/ + scripts/ + cordis
+    # patch) so the installer can place it at ~/.dsh/manager-pkg — the target of
+    # the file: dep above. It is extracted from the baked node_modules, where the
+    # bake copied the actual plugin files (the CI file: path does not exist on
+    # targets).
+    $bakedManagerPkg = Join-Path $profileDir 'profiles\web\node_modules\dsh-web-manager'
+    if (Test-Path -LiteralPath $bakedManagerPkg -PathType Container) {
+        $managerPkgDest = Join-Path $bundle 'manager-pkg'
+        if (Test-Path -LiteralPath $managerPkgDest) { Remove-Item -LiteralPath $managerPkgDest -Recurse -Force }
+        # robocopy dereferences the hoisted file: junction and copies the real
+        # plugin files (Copy-Item -Recurse is unreliable across junctions).
+        & robocopy $bakedManagerPkg $managerPkgDest /E /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "robocopy failed (exit $LASTEXITCODE) copying the manager plugin package." }
+        Write-Host '[bundle] profile: shipped manager plugin package -> bundle\manager-pkg'
+    }
     # Strip the profiles/node_modules tree: it was created during the bake as
     # regular directories, but dsh on Windows expects symlinks here (via
     # healProfilesModuleFallback). On a target machine without Developer Mode

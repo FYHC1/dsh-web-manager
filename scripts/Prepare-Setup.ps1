@@ -46,7 +46,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $BundleDir) { $BundleDir = Join-Path $projectRoot 'bundle-out\dsh-offline-bundle' }
 if (-not $OutDir) { $OutDir = Join-Path $projectRoot 'bundle-out\setup-stage' }
 
-foreach ($part in @('node\node.exe', 'dsh\@deepseek-ai\dsh\package.json', 'profile-web', 'wsl', 'dsh-web-manager\dsh-web-manager.exe')) {
+foreach ($part in @('node\node.exe', 'dsh\@deepseek-ai\dsh\package.json', 'profile-web', 'wsl', 'dsh-web-manager\dsh-web-manager.exe', 'manager-pkg\package.json')) {
     if (-not (Test-Path -LiteralPath (Join-Path $BundleDir $part))) {
         throw "bundle incomplete: $part missing in $BundleDir (run scripts\Build-Bundle.ps1 first)"
     }
@@ -56,13 +56,13 @@ $stage = Join-Path $OutDir 'dsh-offline-bundle'
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 [System.IO.Directory]::CreateDirectory($stage) | Out-Null
 
-# 1. One UNCOMPRESSED tar for the four heavy trees (root-level members).
+# 1. One UNCOMPRESSED tar for the heavy trees (root-level members).
 #    No -a flag: a plain stored tar; Inno's solid lzma2 does the compression
 #    inside the setup EXE. bsdtar reads/writes long paths via pax headers.
 $payload = Join-Path $stage 'payload.tar'
 $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
 if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) { throw 'System32\tar.exe is required to assemble payload.tar.' }
-& $tar -c -f $payload -C $BundleDir dsh node profile-web wsl
+& $tar -c -f $payload -C $BundleDir dsh node profile-web wsl manager-pkg
 if ($LASTEXITCODE -ne 0) { throw "payload.tar creation failed (tar exit $LASTEXITCODE)." }
 
 # 2. Small components copied as-is.

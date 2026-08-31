@@ -231,6 +231,42 @@ fs.writeFileSync(p, JSON.stringify(d, null, 2) + '\n');
 fi
 
 rm -rf "$BAKE_HOME" 2>/dev/null || true
+
+# The bake records the manager plugin as an absolute file: path (the CI checkout
+# root), which does not exist on targets. Rewrite it to a path that resolves on
+# every target: profiles/web -> ~/.dsh/manager-pkg (install-wsl.sh places the
+# real manager plugin package there). Also approve the allowBuilds placeholder
+# entries in pnpm-workspace.yaml (pnpm >= 10 blocks unapproved build scripts:
+# ERR_PNPM_IGNORED_BUILDS).
+PROFILE_PKG="$PROFILE_DIR/profiles/web/package.json"
+if [ -f "$PROFILE_PKG" ]; then
+  node -e "
+const fs = require('fs');
+const p = require('path').resolve('$PROFILE_PKG');
+const d = JSON.parse(fs.readFileSync(p, 'utf-8'));
+if (d.dependencies && d.dependencies['dsh-web-manager']) {
+  d.dependencies['dsh-web-manager'] = 'file:../../manager-pkg';
+  fs.writeFileSync(p, JSON.stringify(d, null, 2) + '\n');
+  console.log('rewrote dsh-web-manager dep -> file:../../manager-pkg');
+}
+" 2>/dev/null || log "WARNING: could not rewrite package.json file: dep (non-fatal)"
+fi
+WS_YAML="$PROFILE_DIR/profiles/web/pnpm-workspace.yaml"
+if [ -f "$WS_YAML" ]; then
+  sed -i -E 's/^([[:space:]]*[A-Za-z0-9._-]+):[[:space:]]*set this to true or false$/\1: true/' "$WS_YAML" 2>/dev/null \
+    && log "profile: approved allowBuilds entries in pnpm-workspace.yaml" \
+    || log "WARNING: could not approve allowBuilds (non-fatal)"
+fi
+
+# Ship the real manager plugin package (lib/ + dist/ + scripts/ + cordis patch)
+# so the installer can place it at ~/.dsh/manager-pkg — the file: dep target.
+BAKED_MANAGER="$PROFILE_DIR/profiles/web/node_modules/dsh-web-manager"
+if [ -d "$BAKED_MANAGER" ]; then
+  rm -rf "$BUNDLE/manager-pkg"
+  cp -aL "$BAKED_MANAGER" "$BUNDLE/manager-pkg"   # -L: dereference the hoisted file: symlink
+  log "profile: shipped manager plugin package -> bundle/manager-pkg"
+fi
+
 log "profile baked -> $PROFILE_DIR (offline start verified)"
 
 # ---------- 5. Installer + manifest ----------

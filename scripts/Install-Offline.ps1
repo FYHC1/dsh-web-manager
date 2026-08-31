@@ -373,6 +373,82 @@ if (Test-Path -LiteralPath $profileSrc) {
     Write-Warning '[offline] bundle has no profile-web\; first dsh start will initialize ~/.dsh itself'
 }
 
+# ---------- 4b. Manager plugin package + local pnpm store (portable profile) ----------
+# The baked profile records pnpm metadata against the CI runner's store path and
+# an absolute file: path for the manager plugin (see Build-Bundle.ps1). Without
+# rewiring both for THIS machine, the first `dsh plugin add/update` fails with
+# ERR_PNPM_UNEXPECTED_STORE (store path mismatch) or file:D:\a\... not found.
+$dshHome = if ($sandboxHome) { Join-Path $sandboxHome '.dsh' } else { Join-Path $env:USERPROFILE '.dsh' }
+if (Test-Path -LiteralPath $dshHome) {
+    # 4b-1. Place the real manager plugin package at ~/.dsh/manager-pkg — the
+    #       target of the profile's `file:../../manager-pkg` dependency. The
+    #       shipped node_modules already contains a copy (works offline); this
+    #       target is what pnpm re-resolves on the first add/update.
+    $managerPkgSrc = if ($treeLayoutB) { Join-Path $TargetRoot 'manager-pkg' } else { Join-Path $BundleDir 'manager-pkg' }
+    if (Test-Path -LiteralPath $managerPkgSrc -PathType Container) {
+        $managerPkgDest = Join-Path $dshHome 'manager-pkg'
+        if (-not (Test-Path -LiteralPath $managerPkgDest)) {
+            Copy-Item -LiteralPath $managerPkgSrc -Destination $managerPkgDest -Recurse
+            Write-Status "[offline] manager plugin package -> $managerPkgDest"
+        } else {
+            # Refresh the package files only (never clobber user edits to config
+            # inside the plugin).
+            Get-ChildItem -LiteralPath $managerPkgSrc -Recurse -File | ForEach-Object {
+                $rel = $_.FullName.Substring($managerPkgSrc.Length + 1)
+                $dest = Join-Path $managerPkgDest $rel
+                if (-not (Test-Path -LiteralPath $dest)) {
+                    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $dest)) | Out-Null
+                    Copy-Item -LiteralPath $_.FullName -Destination $dest
+                }
+            }
+            Write-Status "[offline] existing ~/.dsh/manager-pkg kept; missing files filled"
+        }
+    } else {
+        Write-Warning '[offline] bundle has no manager-pkg\; the manager plugin file: dep will not resolve on dsh plugin ops'
+    }
+
+    # 4b-2. Rewire pnpm's .modules.yaml to the LOCAL default store so pnpm's
+    #       compatibility check passes without a reinstall or network. The bake
+    #       stripped the CI store path (see Build-Bundle.ps1); here we write the
+    #       value pnpm computes for this machine (`pnpm config get store-dir`).
+    $profileWeb = Join-Path $dshHome 'profiles\web'
+    $modulesYaml = Join-Path $profileWeb 'node_modules\.modules.yaml'
+    $pnpmCmd = Join-Path $TargetRoot 'node\pnpm.cmd'
+    if ((Test-Path -LiteralPath $modulesYaml -PathType Leaf) -and (Test-Path -LiteralPath $pnpmCmd -PathType Leaf)) {
+        try {
+            # `pnpm config get store-dir` returns "undefined" when no explicit
+            # store-dir is configured (the default is computed internally);
+            # `pnpm store path` prints the actual absolute store location.
+            $storeRaw = & $pnpmCmd store path 2>$null | Select-Object -Last 1
+            $storeDir = if ($storeRaw) { $storeRaw.Trim() } else { '' }
+            if ([string]::IsNullOrEmpty($storeDir)) { throw 'pnpm returned an empty store-dir' }
+            $yaml = Get-Content -LiteralPath $modulesYaml -Raw | ConvertFrom-Json
+            if ($yaml.PSObject.Properties['storeDir']) { $yaml.PSObject.Properties.Remove('storeDir') }
+            if ($yaml.PSObject.Properties['virtualStoreDir']) { $yaml.PSObject.Properties.Remove('virtualStoreDir') }
+            $yaml | Add-Member -NotePropertyName 'storeDir' -NotePropertyValue $storeDir -Force
+            $yaml | Add-Member -NotePropertyName 'virtualStoreDir' -NotePropertyValue (Join-Path $profileWeb 'node_modules\.pnpm') -Force
+            $yaml | ConvertTo-Json -Depth 8 | ForEach-Object { [System.IO.File]::WriteAllText($modulesYaml, $_, (New-Object System.Text.UTF8Encoding($false))) }
+            Write-Status "[offline] pnpm store rewired -> $storeDir (local default)"
+
+            # 4b-3. Read-only self-check: pnpm must accept the metadata without
+            #       ERR_PNPM_UNEXPECTED_STORE (list never touches the store).
+            Push-Location -LiteralPath $profileWeb
+            try {
+                & $pnpmCmd list --depth 0 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Status '[offline] pnpm self-check OK (store metadata accepted)'
+                } else {
+                    Write-Warning "[offline] pnpm self-check failed (exit $LASTEXITCODE); dsh plugin add/update may need one 'pnpm install' on first use"
+                }
+            } finally {
+                Pop-Location
+            }
+        } catch {
+            Write-Warning "[offline] could not rewire pnpm store ($($_.Exception.Message)); dsh plugin add/update may need one 'pnpm install' on first use"
+        }
+    }
+}
+
 # ---------- 5. Tray manager ----------
 if (-not $SkipManager) {
     if ($sandboxHome) {
