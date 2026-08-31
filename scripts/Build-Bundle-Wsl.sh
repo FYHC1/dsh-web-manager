@@ -213,6 +213,23 @@ fi
 PROFILE_DIR="$BUNDLE/profile-web"
 rm -rf "$PROFILE_DIR"
 mv "$BAKE_HOME/.dsh" "$PROFILE_DIR"
+
+# Strip the bake's absolute storeDir from .modules.yaml (same reason as the
+# Windows build: pnpm's ERR_PNPM_UNEXPECTED_STORE when the CI runner's store
+# path differs from the target machine's default store).
+MODULES_YAML="$PROFILE_DIR/profiles/web/node_modules/.modules.yaml"
+if [ -f "$MODULES_YAML" ]; then
+  node -e "
+const fs = require('fs');
+const p = require('path').resolve('$MODULES_YAML');
+let d = JSON.parse(fs.readFileSync(p, 'utf-8'));
+delete d.storeDir;
+delete d.virtualStoreDir;
+fs.writeFileSync(p, JSON.stringify(d, null, 2) + '\n');
+" 2>/dev/null || log "WARNING: could not patch .modules.yaml (non-fatal)"
+  log "profile: stripped storeDir/virtualStoreDir from .modules.yaml"
+fi
+
 rm -rf "$BAKE_HOME" 2>/dev/null || true
 log "profile baked -> $PROFILE_DIR (offline start verified)"
 

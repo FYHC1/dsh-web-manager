@@ -274,6 +274,24 @@ if (-not $SkipProfile) {
 
     if (Test-Path -LiteralPath $profileDir) { Remove-Item -LiteralPath $profileDir -Recurse -Force }
     Move-Item -LiteralPath (Join-Path $bakeHome '.dsh') -Destination $profileDir
+    # Strip the bake's absolute store path from .modules.yaml: pnpm embeds the
+    # CI runner's storeDir (e.g. D:\a\...) in the metadata; on the target
+    # machine the store is at a different path (e.g. %LOCALAPPDATA%\pnpm\store).
+    # When the user runs `dsh plugin add/update`, pnpm detects the mismatch
+    # and throws ERR_PNPM_UNEXPECTED_STORE — a hard error that blocks all
+    # plugin management. Removing the fields lets pnpm use the default store.
+    $modulesYaml = Join-Path $profileDir 'profiles\web\node_modules\.modules.yaml'
+    if (Test-Path -LiteralPath $modulesYaml -PathType Leaf) {
+        try {
+            $yaml = Get-Content -LiteralPath $modulesYaml -Raw | ConvertFrom-Json
+            if ($yaml.PSObject.Properties['storeDir']) { $yaml.PSObject.Properties.Remove('storeDir') }
+            if ($yaml.PSObject.Properties['virtualStoreDir']) { $yaml.PSObject.Properties.Remove('virtualStoreDir') }
+            $yaml | ConvertTo-Json -Depth 8 | ForEach-Object { [System.IO.File]::WriteAllText($modulesYaml, $_, (New-Object System.Text.UTF8Encoding($false))) }
+            Write-Host "[bundle] profile: stripped storeDir/virtualStoreDir from .modules.yaml (portable store)"
+        } catch {
+            Write-Warning "[bundle] profile: could not patch .modules.yaml ($($_.Exception.Message))"
+        }
+    }
     # Strip the profiles/node_modules tree: it was created during the bake as
     # regular directories, but dsh on Windows expects symlinks here (via
     # healProfilesModuleFallback). On a target machine without Developer Mode
