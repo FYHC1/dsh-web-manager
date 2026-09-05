@@ -98,13 +98,13 @@ namespace DshWebManager
 
         /// <summary>Updates the Windows-side global dsh package. Returns:
         /// 0 = updated, 1 = failed, 2 = dsh is the offline-bundle built-in
-        /// (not an npm-global install; update by re-running the bundle installer).</summary>
+        /// (the caller then runs UpdateBundleDsh for the in-place update).</summary>
         public static int UpdateWindowsDsh()
         {
             if (IsBundleDsh())
             {
                 string dsh = DshLauncher.FindDshCommand();
-                FileLog.Info("UpdateChecker: dsh is the offline-bundle built-in (" + dsh + "); npm -g would not update it");
+                FileLog.Info("UpdateChecker: dsh is the offline-bundle built-in (" + dsh + "); in-place update required");
                 return 2;
             }
             string npm = FindNpmCommand();
@@ -114,6 +114,130 @@ namespace DshWebManager
             if (r.ExitCode != 0)
                 FileLog.Error("UpdateChecker.update(win) failed: " + (r.StandardOutput ?? r.StandardError ?? String.Empty));
             return r.ExitCode == 0 ? 0 : 1;
+        }
+
+        /// <summary>In-place update of the offline-bundle dsh tree with the
+        /// BUNDLED npm (npmmirror) — no global npm and no bundle re-install
+        /// needed. Mirrors Build-Bundle.ps1: npm-install the latest dsh into a
+        /// staging node_modules (--global-style), swap it over <root>\dsh, then
+        /// rewrite the bin\dsh.cmd shim (the package's bin entry path can change
+        /// between versions). The caller must stop managed dsh instances first:
+        /// the swap fails while the tree is locked by a running dsh process
+        /// (rollback restores the old tree). Returns 0 = updated, 1 = failed,
+        /// 2 = bundle layout not recognized.</summary>
+        public static int UpdateBundleDsh()
+        {
+            string dsh = DshLauncher.FindDshCommand();
+            if (String.IsNullOrEmpty(dsh)) return 2;
+            string binDir = Path.GetDirectoryName(dsh);
+            string root = String.IsNullOrEmpty(binDir) ? null : Path.GetDirectoryName(binDir);
+            if (String.IsNullOrEmpty(root)) return 2;
+            string nodeExe = Path.Combine(root, "node", "node.exe");
+            string npmCli = Path.Combine(root, "node", "node_modules", "npm", "bin", "npm-cli.js");
+            string dshDir = Path.Combine(root, "dsh");
+            if (!File.Exists(nodeExe) || !File.Exists(npmCli) || !Directory.Exists(dshDir)) return 2;
+
+            // 1. Stage install — never touch the live tree until the new tree
+            //    is complete (a failed download must leave dsh runnable).
+            string stage = Path.Combine(root, "dsh-update-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            try
+            {
+                Directory.CreateDirectory(stage);
+                File.WriteAllText(Path.Combine(stage, "package.json"),
+                    "{\"name\":\"dsh-bundle-stage\",\"private\":true}");
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("UpdateChecker.bundle-update: staging failed: " + ex.Message);
+                TryDeleteDir(stage);
+                return 1;
+            }
+            FileLog.Info("UpdateChecker: bundle in-place update via " + npmCli + " (npm install @deepseek-ai/dsh@latest, npmmirror, global-style)");
+            CommandResult r = RunWindowsCommand(
+                "cd /d \"" + stage + "\" && \"" + nodeExe + "\" \"" + npmCli + "\" install @deepseek-ai/dsh@latest --global-style --omit=dev --no-audit --no-fund --loglevel=error " + RegistryFlag,
+                600000);
+            if (r.ExitCode != 0 || !Directory.Exists(Path.Combine(stage, "node_modules", "@deepseek-ai", "dsh")))
+            {
+                FileLog.Error("UpdateChecker.bundle-update: npm install failed: " + (r.StandardError ?? r.StandardOutput ?? String.Empty));
+                TryDeleteDir(stage);
+                return 1;
+            }
+
+            // 2. Swap the trees. Directory.Move throws while any process holds
+            //    handles inside the tree (a dsh instance the caller could not
+            //    stop) — roll back and report.
+            string oldDir = Path.Combine(root, "dsh.old");
+            TryDeleteDir(oldDir);
+            bool movedOld = false;
+            try
+            {
+                Directory.Move(dshDir, oldDir);
+                movedOld = true;
+                Directory.Move(Path.Combine(stage, "node_modules"), dshDir);
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("UpdateChecker.bundle-update: swap failed (a dsh instance may still be running): " + ex.Message);
+                if (movedOld && !Directory.Exists(dshDir)) { try { Directory.Move(oldDir, dshDir); } catch (Exception) { } }
+                TryDeleteDir(stage);
+                return 1;
+            }
+            TryDeleteDir(stage);
+            TryDeleteDir(oldDir);
+
+            // 3. Rewrite the shim from the NEW package.json bin field (the entry
+            //    path can change between dsh versions). On any failure keep the
+            //    existing shim — its target usually still exists.
+            try
+            {
+                string rel = ReadDshBinEntry(Path.Combine(dshDir, "@deepseek-ai", "dsh", "package.json"));
+                if (!String.IsNullOrEmpty(rel))
+                {
+                    string entry = Path.Combine(dshDir, rel.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(entry))
+                    {
+                        File.WriteAllText(Path.Combine(binDir, "dsh.cmd"),
+                            "@echo off\r\nsetlocal\r\n\"" + nodeExe + "\" \"" + entry + "\" %*\r\n",
+                            new UTF8Encoding(false));
+                        FileLog.Info("UpdateChecker.bundle-update: shim rewritten -> " + entry);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("UpdateChecker.bundle-update: shim rewrite failed (dsh.cmd kept): " + ex.Message);
+            }
+            FileLog.Info("UpdateChecker.bundle-update: OK");
+            return 0;
+        }
+
+        /// <summary>dsh bin entry from a package.json (bin as string or {dsh:…}),
+        /// via the same JavaScriptSerializer ManagerConfig uses.</summary>
+        private static string ReadDshBinEntry(string packageJsonPath)
+        {
+            if (!File.Exists(packageJsonPath)) return String.Empty;
+            object pkg = new System.Web.Script.Serialization.JavaScriptSerializer()
+                .Deserialize<object>(File.ReadAllText(packageJsonPath));
+            Dictionary<string, object> rootObj = pkg as Dictionary<string, object>;
+            if (rootObj == null) return String.Empty;
+            object bin;
+            if (!rootObj.TryGetValue("bin", out bin)) return String.Empty;
+            string single = bin as string;
+            if (single != null) return single;
+            Dictionary<string, object> binMap = bin as Dictionary<string, object>;
+            if (binMap == null) return String.Empty;
+            object entry;
+            return binMap.TryGetValue("dsh", out entry) ? entry as string : String.Empty;
+        }
+
+        private static void TryDeleteDir(string dir)
+        {
+            try
+            {
+                if (!String.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                    Directory.Delete(dir, true);
+            }
+            catch (Exception ex) { FileLog.Error("UpdateChecker: delete " + dir + " failed: " + ex.Message); }
         }
 
         /// <summary>true when the resolved dsh.cmd is the offline-bundle shim

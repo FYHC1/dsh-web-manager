@@ -612,7 +612,35 @@ namespace DshWebManager
                         int rc = UpdateChecker.UpdateWindowsDsh();
                         if (rc == 2)
                         {
-                            if (b != null) b("dsh web manager", "当前 dsh 为离线包内置版本（非 npm 全局安装），管理器无法直接更新；请重新运行离线包安装器 (Install-Offline.ps1) 升级");
+                            // Offline-bundle built-in dsh: update IN PLACE with the
+                            // bundled npm (no bundle re-install needed). The tree
+                            // swap requires the dsh processes gone — stop managed
+                            // instances first and restart the ones that ran.
+                            if (b != null) b("dsh web manager", "dsh 为离线包内置版本，正在就地更新（捆绑 npm，npmmirror）…");
+                            List<InstanceController> running = new List<InstanceController>();
+                            foreach (InstanceController c in _controllers)
+                            {
+                                if (c.State == InstanceState.Managed)
+                                {
+                                    try { c.Stop(false); running.Add(c); }
+                                    catch (Exception ex) { FileLog.Error("ApplyDshUpdate stop: " + ex.Message); }
+                                }
+                            }
+                            rc = UpdateChecker.UpdateBundleDsh();
+                            foreach (InstanceController c in running)
+                            {
+                                try { c.Start(); }
+                                catch (Exception ex) { FileLog.Error("ApplyDshUpdate restart: " + ex.Message); }
+                            }
+                            if (b != null)
+                            {
+                                if (rc == 0)
+                                    b("dsh web manager", "dsh 就地更新完成：" + UpdateChecker.GetCurrentWindowsDshVersion());
+                                else if (rc == 1)
+                                    b("dsh web manager", "dsh 就地更新失败（可能仍有 dsh 实例占用文件），请查看日志后重试");
+                                else
+                                    b("dsh web manager", "当前 dsh 为离线包内置版本，但 bundle 布局无法识别；请重新运行离线包安装器 (Install-Offline.ps1) 升级");
+                            }
                         }
                         else
                         {

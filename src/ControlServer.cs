@@ -125,6 +125,8 @@ namespace DshWebManager
                     _service.CheckForManagerUpdate();
                 else if (action.Equals("updateplugin", StringComparison.OrdinalIgnoreCase))
                     _service.UpdatePluginBundle();
+                else if (action.Equals("updatedsh", StringComparison.OrdinalIgnoreCase))
+                    _service.ApplyDshUpdate();
                 else if (action.StartsWith("backend ", StringComparison.OrdinalIgnoreCase))
                     _service.SetBackend(action.Substring("backend ".Length).Trim());
                 else if (action.StartsWith("wslmode ", StringComparison.OrdinalIgnoreCase))

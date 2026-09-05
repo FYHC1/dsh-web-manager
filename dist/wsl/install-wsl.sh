@@ -126,6 +126,47 @@ if [ "$SKIP_PROFILE" != "1" ] && [ -d "$SRC/profile-web" ]; then
       done )
     log "existing $HOME/.dsh kept; missing files filled from the bundle"
   fi
+
+  # ---------- 3b. Manager plugin package + local pnpm store (portable profile) ----------
+  # The bake records pnpm metadata against the CI store path and an absolute
+  # file: path for the manager plugin. Rewire both for THIS machine so the first
+  # `dsh plugin add/update` does not fail with ERR_PNPM_UNEXPECTED_STORE or a
+  # file:D:\a\... not-found.
+  if [ -d "$SRC/manager-pkg" ]; then
+    if [ ! -d "$HOME/.dsh/manager-pkg" ]; then
+      mkdir -p "$HOME/.dsh"
+      cp -aL "$SRC/manager-pkg" "$HOME/.dsh/manager-pkg"
+      log "manager plugin package -> $HOME/.dsh/manager-pkg"
+    else
+      ( cd "$SRC/manager-pkg" && find . -type f | while read -r f; do
+          target="$HOME/.dsh/manager-pkg/$f"
+          if [ ! -e "$target" ]; then
+            mkdir -p "$(dirname "$target")"
+            cp "$SRC/manager-pkg/$f" "$target"
+          fi
+        done )
+      log "existing $HOME/.dsh/manager-pkg kept; missing files filled"
+    fi
+  fi
+
+  MODULES_YAML="$HOME/.dsh/profiles/web/node_modules/.modules.yaml"
+  if [ -f "$MODULES_YAML" ]; then
+    # `pnpm config get store-dir` returns "undefined" unless explicitly set;
+    # `pnpm store path` prints the actual computed absolute store location.
+    STORE_DIR="$("$NODE_BIN" "$SRC/node/bin/pnpm" store path 2>/dev/null | tail -n 1 | tr -d '[:space:]')"
+    if [ -n "$STORE_DIR" ]; then
+      node -e "
+const fs = require('fs');
+const path = require('path');
+const p = path.resolve('$MODULES_YAML');
+let d = JSON.parse(fs.readFileSync(p, 'utf-8'));
+d.storeDir = '$STORE_DIR';
+d.virtualStoreDir = path.resolve('$HOME/.dsh/profiles/web/node_modules/.pnpm');
+fs.writeFileSync(p, JSON.stringify(d, null, 2) + '\n');
+" 2>/dev/null && log "pnpm store rewired -> $STORE_DIR" \
+      || log "WARNING: could not rewire pnpm store (non-fatal)"
+    fi
+  fi
 fi
 
 # ---------- 4. Companion scripts ----------
