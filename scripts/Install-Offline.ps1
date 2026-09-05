@@ -208,6 +208,14 @@ if (-not (Test-Path -LiteralPath $payloadArchive -PathType Leaf)) {
     $payloadArchive = Join-Path $BundleDir 'payload.zip'
 }
 $treeLayoutB = Test-Path -LiteralPath $payloadArchive -PathType Leaf
+
+# Heads-up BEFORE the heavy I/O: proactive security suites have been observed
+# quarantining the freshly extracted trees within seconds (survival check
+# below catches it — this warning explains what to do before it happens).
+$secEarly = @(Get-Process | Where-Object { $_.Name -match '^(360tray|360safe|360zip|ZhuDongFangYu|HipsDaemon|HipsTray|usysdiag|wsctrl|sysdiag)$' } | ForEach-Object { $_.Name } | Select-Object -Unique)
+if ($secEarly.Count -gt 0) {
+    Write-Warning ("[offline] security software running (" + ($secEarly -join ', ') + "). If payload files vanish during install, whitelist '" + $TargetRoot + "' (and exit the suite while installing), then run the setup again.")
+}
 if ($treeLayoutB) {
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         throw "Bundle incomplete: bundle.json missing under $BundleDir."
@@ -306,6 +314,19 @@ if (-not $treeLayoutB) {
         Expand-Archive -LiteralPath $payloadArchive -DestinationPath $TargetRoot -Force
     } else {
         throw 'System32\tar.exe is required to unpack the payload archive and is missing on this machine.'
+    }
+    # SURVIVAL CHECK, immediately after extraction. Real-world case: security
+    # software with proactive/real-time protection (360 ZhuDongFangYu /
+    # HipsDaemon, Huorong) quarantined the freshly extracted node/dsh trees
+    # within seconds — tar returned 0, then the files were gone, leaving a
+    # half-installed bundle (this failed LATE, after the WSL pass, with a
+    # confusing "node.exe is not recognized" error). Fail here, fast, with a
+    # named culprit and the exact whitelist path. The payload archive is only
+    # deleted AFTER this check so a blocked install can simply be re-run.
+    if (-not (Test-Path -LiteralPath (Join-Path $TargetRoot 'node\node.exe') -PathType Leaf)) {
+        $sec = @(Get-Process | Where-Object { $_.Name -match '^(360tray|360safe|360zip|ZhuDongFangYu|HipsDaemon|HipsTray|usysdiag|wsctrl|sysdiag)$' } | ForEach-Object { $_.Name } | Select-Object -Unique)
+        $secNote = if ($sec.Count -gt 0) { ' Detected security software: ' + ($sec -join ', ') + '. Whitelist the folder "' + $TargetRoot + '" (or exit the suite), then run the setup again.' } else { ' Re-run the setup; if this repeats, whitelist "' + $TargetRoot + '" in your antivirus.' }
+        throw ("payload files vanished right after extraction (antivirus quarantine?)." + $secNote)
     }
     try { Remove-Item -LiteralPath $payloadArchive -Force -ErrorAction SilentlyContinue } catch { }
     Write-Status "[offline] payload extracted (node+dsh+profile-web+wsl) -> $TargetRoot (single archive pass)"

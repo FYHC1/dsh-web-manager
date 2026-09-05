@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿using System;
 using System.Reflection;
 
 [assembly: AssemblyTitle("dsh web manager")]
@@ -6,5 +6,5 @@ using System.Reflection;
 [assembly: AssemblyProduct("dsh web manager")]
 [assembly: AssemblyCompany("dsh-web-manager")]
 [assembly: AssemblyCopyright("MIT License")]
-[assembly: AssemblyVersion("3.9.14.0")]
-[assembly: AssemblyFileVersion("3.9.14.0")]
+[assembly: AssemblyVersion("3.9.15.0")]
+[assembly: AssemblyFileVersion("3.9.15.0")]
