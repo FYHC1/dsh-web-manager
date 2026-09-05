@@ -398,7 +398,16 @@ namespace DshWebManager
             // slow" window pop. The window now opens at once and loads the page as
             // soon as the URL becomes reachable; a background check reports the
             // genuinely-unreachable case instead of delaying the window.
-            string url = DshWebAuth.WindowUrl(c.ActivePort);
+            // URL choice: open the real WebUI directly ONLY when the service is
+            // up AND its launch token is already captured (dsh >= 0.1.2 401s a
+            // tokenless URL). Otherwise show the built-in loading page — a cold
+            // start then never flashes a browser error / 401 body; the
+            // reachability poll re-navigates the window once ready.
+            int port = c.ActivePort;
+            bool openedReal = PortInspector.IsListening(port) && DshWebAuth.HasToken(port);
+            string url = openedReal
+                ? DshWebAuth.WindowUrl(port)
+                : EdgeWindow.LoadingUrl(port);
             try
             {
                 EdgeWindow.EnsureVisible(c.Instance.Window, _config.DataDir, url, c.ActivePort);
@@ -413,7 +422,7 @@ namespace DshWebManager
                 FileLog.Error("OpenWindow failed: " + ex.Message);
                 var b = Balloon; if (b != null) b("dsh web manager", "打开窗口失败: " + ex.Message);
             }
-            ScheduleReachabilityCheck(c);
+            ScheduleReachabilityCheck(c, !openedReal);
         }
 
         /// <summary>Background diagnostic after opening a window. A cold dsh
@@ -421,11 +430,11 @@ namespace DshWebManager
         /// seconds, so this POLLS up to ~45s before reporting anything — the
         /// previous fixed 10s wait fired mid-startup and reported "未检测到
         /// dsh"/"启动超时" for services that came up seconds later. When the
-        /// service turns reachable, the window is re-navigated to the current
-        /// (token-authenticated) URL: windows that opened too early show a
-        /// browser error or dsh's 401 body and would otherwise keep doing so
-        /// until the user manually reopened them.</summary>
-        private void ScheduleReachabilityCheck(InstanceController c)
+        /// service turns reachable and the window had opened on the loading
+        /// page (recoverWindow), it is re-navigated to the real
+        /// (token-authenticated) URL; windows opened straight on the WebUI are
+        /// left alone (a re-navigation would needlessly reload them).</summary>
+        private void ScheduleReachabilityCheck(InstanceController c, bool recoverWindow)
         {
             int port = c.ActivePort;
             bool isWsl = c.Instance != null && c.Instance.IsWsl;
@@ -442,11 +451,13 @@ namespace DshWebManager
                     }
                     if (ready)
                     {
+                        if (!recoverWindow) return;
                         // The launch token is printed on stdout around the same
                         // moment the port opens; give the capture a moment so
                         // the recovery navigation authenticates on first go.
-                        for (int i = 0; i < 5 && !DshWebAuth.HasToken(port); i++)
-                            Thread.Sleep(1000);
+                        // (Capped: dsh < 0.1.2 never prints a token.)
+                        for (int i = 0; i < 8 && !DshWebAuth.HasToken(port); i++)
+                            Thread.Sleep(500);
                         EdgeWindow.Renavigate(c.Instance.Window, _config.DataDir, port, DshWebAuth.WindowUrl(port));
                         return;
                     }

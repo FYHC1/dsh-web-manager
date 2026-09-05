@@ -230,6 +230,7 @@ namespace DshWebManager
         public void Renavigate(string url)
         {
             if (IsDisposed || String.IsNullOrEmpty(url)) return;
+            if (_url == url) return; // already there: avoid a needless reload
             _url = url;
             if (_webView.CoreWebView2 != null)
                 _webView.CoreWebView2.Navigate(url);

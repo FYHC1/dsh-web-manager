@@ -320,6 +320,44 @@ namespace DshWebManager
             catch (Exception ex) { FileLog.Error("EdgeWindow.Renavigate relaunch: " + ex.Message); }
         }
 
+        /// <summary>URL of the built-in "dsh web 正在启动…" loading page shown by
+        /// windows that open before the service is reachable. A self-contained
+        /// dark page (same background as the WebUI, CSS spinner, no external
+        /// resources) written next to the manager logs and served as file:// —
+        /// works in both WebView2 and Edge --app windows. The recovery pass
+        /// re-navigates the window to the real URL once the service is up.</summary>
+        public static string LoadingUrl(int port)
+        {
+            try
+            {
+                string html = "<!doctype html><html><head><meta charset=\"utf-8\">"
+                    + "<title>DeepSeek Harness WebUI</title><style>"
+                    + "html,body{height:100%;margin:0;background:#0B1622;color:#8aa2b8;"
+                    + "font-family:'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center}"
+                    + ".box{text-align:center}"
+                    + ".spin{width:44px;height:44px;margin:0 auto 22px;border:3px solid #1d3348;"
+                    + "border-top-color:#4da3ff;border-radius:50%;animation:s 1s linear infinite}"
+                    + "@keyframes s{to{transform:rotate(360deg)}}"
+                    + "h1{font-size:17px;font-weight:500;color:#cfe3f5;margin:0 0 10px}"
+                    + "p{font-size:12px;margin:4px 0}"
+                    + ".hint{color:#51708c;font-size:11px;margin-top:18px}"
+                    + "</style></head><body><div class=\"box\"><div class=\"spin\"></div>"
+                    + "<h1>dsh web 正在启动…</h1>"
+                    + "<p>port " + port + "</p>"
+                    + "<p class=\"hint\">首次启动可能需要数十秒，就绪后本页会自动进入 WebUI</p>"
+                    + "</div></body></html>";
+                string file = Path.Combine(AppPaths.LogDir, "loading-" + port + ".html");
+                Directory.CreateDirectory(AppPaths.LogDir);
+                File.WriteAllText(file, html, new System.Text.UTF8Encoding(false));
+                return new Uri(file).AbsoluteUri;
+            }
+            catch (Exception ex)
+            {
+                FileLog.Error("LoadingUrl failed: " + ex.Message);
+                return String.Empty;
+            }
+        }
+
         // ------------------------------------------------------------------
         // Geometry hook: sizes the app window while it is still hidden.
         // An out-of-process WinEvent hook (no DLL injection) watches
