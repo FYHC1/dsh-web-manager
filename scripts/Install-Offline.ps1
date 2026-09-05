@@ -374,6 +374,19 @@ $profileSrc = if ($treeLayoutB) { Join-Path $TargetRoot 'profile-web' } else { J
 if (Test-Path -LiteralPath $profileSrc) {
     # Sandbox testing (TESTING.md): never touch the real %USERPROFILE%\.dsh.
     $dshHome = if ($sandboxHome) { Join-Path $sandboxHome '.dsh' } else { Join-Path $env:USERPROFILE '.dsh' }
+    # Stale profiles\node_modules: bundles up to v3.9.7 baked it as regular
+    # directories; dsh >= 0.1.2 hard-fails on them ("exists and is not a
+    # symlink"). New bundles ship WITHOUT the tree and fill-gaps never removes
+    # files, so drop the stale tree explicitly on every install.
+    $staleProfilesNodeModules = Join-Path $dshHome 'profiles\node_modules'
+    if (Test-Path -LiteralPath $staleProfilesNodeModules) {
+        try {
+            Remove-Item -LiteralPath $staleProfilesNodeModules -Recurse -Force
+            Write-Status "[offline] removed stale profiles\node_modules (dsh recreates symlinks on start)"
+        } catch {
+            Write-Warning "[offline] could not remove stale profiles\node_modules ($($_.Exception.Message))"
+        }
+    }
     if (-not (Test-Path -LiteralPath $dshHome)) {
         Copy-Item -LiteralPath $profileSrc -Destination $dshHome -Recurse
         Write-Status "[offline] profile installed -> $dshHome"

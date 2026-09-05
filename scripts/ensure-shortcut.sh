@@ -23,7 +23,20 @@ fi
 # Convert the WSL path to a Windows-accessible one (\\wsl.localhost\<distro>\...).
 WIN_PS1="$(wslpath -w "$SCRIPT_DIR/ensure-shortcut.ps1" 2>/dev/null || echo "$SCRIPT_DIR/ensure-shortcut.ps1")"
 
-"$PS" -NoProfile -ExecutionPolicy Bypass -File "$WIN_PS1" -Backend wsl
+# Copy the script to the WINDOWS temp dir and execute it from there when
+# possible: PowerShell 5.1 reading a .ps1 straight off \wsl.localhost (9P) is
+# unreliable - truncated reads surface as nonsense parse errors. A local
+# %TEMP% copy sidesteps 9P entirely.
+TMP_WIN_PS1="$WIN_PS1"
+WIN_TEMP="$("$PS" -NoProfile -Command '$env:TEMP' 2>/dev/null | tr -d '')"
+if [ -n "$WIN_TEMP" ]; then
+  U_WIN_TEMP="$(wslpath -u "$WIN_TEMP" 2>/dev/null || true)"
+  if [ -n "$U_WIN_TEMP" ] && cp "$SCRIPT_DIR/ensure-shortcut.ps1" "$U_WIN_TEMP/ensure-shortcut-wsl.ps1" 2>/dev/null; then
+    TMP_WIN_PS1="$(wslpath -w "$U_WIN_TEMP/ensure-shortcut-wsl.ps1" 2>/dev/null || echo "$WIN_PS1")"
+  fi
+fi
+
+"$PS" -NoProfile -ExecutionPolicy Bypass -File "$TMP_WIN_PS1" -Backend wsl
 
 # Register the dsh-webui command: open the standalone window from WSL via the
 # shared tray manager (idempotent; refreshed on every plugin update).

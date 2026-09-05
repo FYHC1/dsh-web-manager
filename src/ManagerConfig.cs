@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Web.Script.Serialization;
@@ -148,7 +148,7 @@ namespace DshWebManager
             ManagerUpdateApi = String.Empty;
             PluginUpdateSpec = String.Empty;
             Profile = "web";
-            Version = "3.9.15";
+            Version = "3.9.16";
             WindowBackend = "auto";
             DshCommand = String.Empty;
             Instances = null; // null = legacy single-instance mode
@@ -182,7 +182,7 @@ namespace DshWebManager
                         if (loaded.ManagerUpdateApi == null) loaded.ManagerUpdateApi = String.Empty;
                         if (loaded.PluginUpdateSpec == null) loaded.PluginUpdateSpec = String.Empty;
                         if (String.IsNullOrEmpty(loaded.Profile)) loaded.Profile = "web";
-                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.9.15";
+                        if (String.IsNullOrEmpty(loaded.Version)) loaded.Version = "3.9.16";
                         if (String.IsNullOrEmpty(loaded.WindowBackend)) loaded.WindowBackend = "auto";
                         if (loaded.DshCommand == null) loaded.DshCommand = String.Empty;
                         if (!loaded.StopAttached.HasValue) loaded.StopAttached = true; // legacy configs default to stop

@@ -269,6 +269,34 @@ fi
 
 log "profile baked -> $PROFILE_DIR (offline start verified)"
 
+# ---------- 4d. Shipped-tree gate: boot the ACTUAL payload ----------
+# The offline gate above ran against the bake-home tree; since then files were
+# moved into $BUNDLE and the profile rewritten. Boot dsh ONCE from the shipped
+# node/dsh trees + a copy of the shipped profile: an incomplete tree (observed
+# once on CI: npm reify silently dropped pi-ai's dotfile .manifest.json, dsh
+# then crashed on first target-machine start) must fail the CI job here.
+log "bake: shipped-tree smoke gate (offline)"
+GATE_HOME=$(mktemp -d)
+cp -a "$PROFILE_DIR" "$GATE_HOME/.dsh"
+( cd "$GATE_HOME" && env HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 NO_PROXY= \
+    PATH="$BUNDLE/node/bin:$PATH" \
+    HOME="$GATE_HOME" XDG_DATA_HOME="$GATE_HOME/.local/share" XDG_CACHE_HOME="$GATE_HOME/.cache" \
+    DSH_HOME="$GATE_HOME/.dsh" \
+    "$BUNDLE/node/bin/node" "$BUNDLE/dsh/@deepseek-ai/dsh/$DSH_REL_ENTRY" --profile web --host 127.0.0.1 --port "$BAKE_PORT" --no-open \
+    > "$OUTDIR/bake-linux-shipped.out.log" 2> "$OUTDIR/bake-linux-shipped.err.log" ) &
+GATE_PID=$!
+GATE_OK=0
+if wait_port 40; then GATE_OK=1; fi
+pkill -P "$GATE_PID" 2>/dev/null || true; kill "$GATE_PID" 2>/dev/null || true
+rm -rf "$GATE_HOME"
+if [ "$GATE_OK" != "1" ]; then
+  for f in "$OUTDIR/bake-linux-shipped.out.log" "$OUTDIR/bake-linux-shipped.err.log"; do
+    if [ -s "$f" ]; then echo "---- $f (tail) ----"; tail -n 15 "$f" | sed 's/^/  /'; fi
+  done
+  die "shipped-tree gate FAILED: the payload tree as shipped cannot boot dsh; do not ship it (logs above)"
+fi
+log "shipped-tree gate passed (payload tree boots offline)"
+
 # ---------- 5. Installer + manifest ----------
 cp -f "$SCRIPT_DIR/wsl/install-wsl.sh" "$BUNDLE/install-wsl.sh"
 chmod +x "$BUNDLE/install-wsl.sh"

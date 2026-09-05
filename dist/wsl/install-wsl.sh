@@ -113,6 +113,15 @@ esac
 
 # ---------- 3. Profile (fill gaps; never clobber credentials) ----------
 if [ "$SKIP_PROFILE" != "1" ] && [ -d "$SRC/profile-web" ]; then
+  # Stale profiles/node_modules: bundles up to v3.9.7 baked it as regular
+  # directories; dsh >= 0.1.2 hard-fails on them ("exists and is not a
+  # symlink"). Fresh bundles ship WITHOUT the tree (dsh recreates symlinks on
+  # first start), and fill-gaps never removes files — so drop the stale tree
+  # explicitly on every install.
+  if [ -d "$HOME/.dsh/profiles/node_modules" ]; then
+    rm -rf "$HOME/.dsh/profiles/node_modules"
+    log "removed stale ~/.dsh/profiles/node_modules (dsh recreates symlinks on start)"
+  fi
   if [ ! -d "$HOME/.dsh" ]; then
     cp -a "$SRC/profile-web" "$HOME/.dsh"
     log "profile installed -> $HOME/.dsh"
