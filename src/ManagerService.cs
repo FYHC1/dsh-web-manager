@@ -398,7 +398,7 @@ namespace DshWebManager
             // slow" window pop. The window now opens at once and loads the page as
             // soon as the URL becomes reachable; a background check reports the
             // genuinely-unreachable case instead of delaying the window.
-            string url = "http://127.0.0.1:" + c.ActivePort + "/";
+            string url = DshWebAuth.WindowUrl(c.ActivePort);
             try
             {
                 EdgeWindow.EnsureVisible(c.Instance.Window, _config.DataDir, url, c.ActivePort);

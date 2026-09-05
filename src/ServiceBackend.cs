@@ -154,7 +154,7 @@ namespace DshWebManager
 
         public string GetWindowUrl(int port)
         {
-            return "http://127.0.0.1:" + port + "/";
+            return DshWebAuth.WindowUrl(port);
         }
 
         public void RefreshRuntime(int port)

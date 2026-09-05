@@ -265,7 +265,9 @@ namespace DshWebManager
             string logOut = Path.Combine(AppPaths.LogDir, "wsl-dsh.out.log");
             string logErr = Path.Combine(AppPaths.LogDir, "wsl-dsh.err.log");
             FileLog.Info("WslBackend: launching " + Describe() + " dsh on port " + port + " (profile " + profile + ")");
-            _proc = WslTools.StartWsl(_distro, "bash", new string[] { "-lc", cmd }, logOut, logErr);
+            DshWebAuth.Forget(port); // any previous token for this port is void
+            _proc = WslTools.StartWsl(_distro, "bash", new string[] { "-lc", cmd }, logOut, logErr,
+                delegate(string line) { DshWebAuth.ObserveLine(port, line); });
             if (_proc == null)
             {
                 FileLog.Error("WslBackend.Start: wsl.exe did not start");
@@ -401,7 +403,7 @@ namespace DshWebManager
         public string GetWindowUrl(int port)
         {
             if (PortInspector.IsListening(port))
-                return "http://127.0.0.1:" + port + "/";
+                return DshWebAuth.WindowUrl(port);
             FileLog.Info("WslBackend: port " + port + " not reachable from Windows (localhost forwarding off?)");
             return String.Empty;
         }

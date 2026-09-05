@@ -105,9 +105,14 @@ namespace DshWebManager
 
             Process p = new Process();
             p.StartInfo = psi;
+            DshWebAuth.Forget(port); // any previous token for this port is void
             p.OutputDataReceived += delegate(object sender, System.Diagnostics.DataReceivedEventArgs e)
             {
-                if (e.Data != null) FileLog.AppendLine(logOut, e.Data);
+                if (e.Data != null)
+                {
+                    FileLog.AppendLine(logOut, e.Data);
+                    DshWebAuth.ObserveLine(port, e.Data); // capture ?token= (dsh >= 0.1.2)
+                }
             };
             p.ErrorDataReceived += delegate(object sender, System.Diagnostics.DataReceivedEventArgs e)
             {

@@ -353,6 +353,13 @@ namespace DshWebManager
         /// </summary>
         public static Process StartWsl(string distro, string command, IList<string> args, string outLog, string errLog)
         {
+            return StartWsl(distro, command, args, outLog, errLog, null);
+        }
+
+        /// <summary>Overload with `onOutLine`: invoked for every stdout line of
+        /// the wrapper (WslBackend uses it to capture the dsh web launch token).</summary>
+        public static Process StartWsl(string distro, string command, IList<string> args, string outLog, string errLog, Action<string> onOutLine)
+        {
             List<string> wslArgs = BuildWslArgs(distro, command, args);
             ProcessStartInfo psi = new ProcessStartInfo();
             psi.FileName = FindWslExe();
@@ -369,7 +376,11 @@ namespace DshWebManager
             p.StartInfo = psi;
             p.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
             {
-                if (e.Data != null) FileLog.AppendLine(outLog, e.Data);
+                if (e.Data != null)
+                {
+                    FileLog.AppendLine(outLog, e.Data);
+                    if (onOutLine != null) onOutLine(e.Data);
+                }
             };
             p.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
             {
