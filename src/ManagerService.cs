@@ -416,12 +416,15 @@ namespace DshWebManager
             ScheduleReachabilityCheck(c);
         }
 
-        /// <summary>Background diagnostic: ~10s after opening, if the service is
-        /// still not reachable from Windows (WSL forwarding off / service down),
-        /// tell the user why instead of leaving them staring at an error page.
-        /// The text is backend-specific: a Windows instance that never came up
-        /// (e.g. dsh was uninstalled and PATH no longer resolves dsh.cmd) must not
-        /// be reported as a WSL/distro problem.</summary>
+        /// <summary>Background diagnostic after opening a window. A cold dsh
+        /// start (first run after an install, profile init) can take tens of
+        /// seconds, so this POLLS up to ~45s before reporting anything — the
+        /// previous fixed 10s wait fired mid-startup and reported "未检测到
+        /// dsh"/"启动超时" for services that came up seconds later. When the
+        /// service turns reachable, the window is re-navigated to the current
+        /// (token-authenticated) URL: windows that opened too early show a
+        /// browser error or dsh's 401 body and would otherwise keep doing so
+        /// until the user manually reopened them.</summary>
         private void ScheduleReachabilityCheck(InstanceController c)
         {
             int port = c.ActivePort;
@@ -430,8 +433,23 @@ namespace DshWebManager
             {
                 try
                 {
-                    Thread.Sleep(10000);
-                    if (PortInspector.IsListening(port)) return; // reachable now
+                    bool ready = false;
+                    for (int i = 0; i < 22; i++) // 22 x 2s = ~44s (start timeout is 60s)
+                    {
+                        Thread.Sleep(2000);
+                        if (PortInspector.IsListening(port)) { ready = true; break; }
+                        if (c.State == InstanceState.Error) break; // hard failure: report now
+                    }
+                    if (ready)
+                    {
+                        // The launch token is printed on stdout around the same
+                        // moment the port opens; give the capture a moment so
+                        // the recovery navigation authenticates on first go.
+                        for (int i = 0; i < 5 && !DshWebAuth.HasToken(port); i++)
+                            Thread.Sleep(1000);
+                        EdgeWindow.Renavigate(c.Instance.Window, _config.DataDir, port, DshWebAuth.WindowUrl(port));
+                        return;
+                    }
                     bool serviceUp = false;
                     try { serviceUp = c.Backend.IsServiceUp(port); }
                     catch { }

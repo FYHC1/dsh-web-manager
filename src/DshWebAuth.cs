@@ -46,6 +46,14 @@ namespace DshWebManager
             Tokens.TryRemove(port, out removed);
         }
 
+        /// <summary>True when a launch token has been captured for the port.</summary>
+        public static bool HasToken(int port)
+        {
+            if (port <= 0) return false;
+            string token;
+            return Tokens.TryGetValue(port, out token) && !String.IsNullOrEmpty(token);
+        }
+
         /// <summary>Window URL for the port: carries the captured launch token
         /// when available, plain URL otherwise (older dsh / attached instance —
         /// those rely on the persistent cookie).</summary>

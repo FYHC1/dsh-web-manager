@@ -82,6 +82,17 @@ namespace DshWebManager
             return form.WindowHandle;
         }
 
+        /// <summary>Re-navigates the running window to `url` (no-op when the
+        /// window is gone). Called once the dsh service turns reachable to
+        /// recover windows that opened too early.</summary>
+        public static void Renavigate(int port, string url)
+        {
+            WebViewForm form = GetForm(port);
+            if (form == null || form.IsDisposed) return;
+            try { form.BeginInvoke(new Action(delegate() { form.Renavigate(url); })); }
+            catch (Exception) { } // pump thread gone: the window is closing anyway
+        }
+
         public static void CloseWindow(int port)
         {
             WebViewForm form = GetForm(port);
@@ -172,7 +183,7 @@ namespace DshWebManager
     /// tear windows down from any thread.</summary>
     public sealed class WebViewForm : Form
     {
-        private readonly string _url;
+        private string _url;
         private readonly int _port;
         private readonly string _userDataFolder;
         private readonly WebView2 _webView;
@@ -210,6 +221,19 @@ namespace DshWebManager
 
         /// <summary>The window handle, published by HandleCreated on the form thread.</summary>
         public IntPtr WindowHandle { get { return _handle; } }
+
+        /// <summary>Navigates the running window to a new URL (used to recover a
+        /// window that opened before the dsh service became reachable: the page
+        /// it initially showed is a browser error or dsh's 401 body). If the
+        /// WebView2 core is not initialized yet, the URL simply replaces the
+        /// one OnLoad will navigate to.</summary>
+        public void Renavigate(string url)
+        {
+            if (IsDisposed || String.IsNullOrEmpty(url)) return;
+            _url = url;
+            if (_webView.CoreWebView2 != null)
+                _webView.CoreWebView2.Navigate(url);
+        }
 
         public void RestoreAndFocus()
         {

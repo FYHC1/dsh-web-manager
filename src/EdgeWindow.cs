@@ -296,6 +296,30 @@ namespace DshWebManager
             return true;
         }
 
+        /// <summary>Re-navigates an existing window to `url`. Used to recover a
+        /// window that opened before the dsh service was reachable (it would
+        /// otherwise keep showing a browser error or dsh's 401 body until the
+        /// user manually reopens it).
+        /// - WebView2 mode: navigates the in-process control (no flicker).
+        /// - Edge mode: an out-of-process --app window cannot be navigated from
+        ///   outside; close it and relaunch with the fresh URL (one flicker).</summary>
+        public static void Renavigate(WindowConfig window, string dataDir, int port, string url)
+        {
+            if (port <= 0 || String.IsNullOrEmpty(url)) return;
+            if (IsWebView2Mode) { FileLog.Info("Window recovery: re-navigating WebView2 window (port " + port + ")"); WebViewWindow.Renavigate(port, url); return; }
+            IntPtr h = FindAppWindow(port);
+            if (h == IntPtr.Zero) return; // nothing to recover; EnsureVisible will open fresh
+            try { CloseWindow(port); } catch (Exception ex) { FileLog.Error("EdgeWindow.Renavigate close: " + ex.Message); }
+            // Give the closing browser a moment to release the per-port profile.
+            System.Threading.Thread.Sleep(1200);
+            try
+            {
+                IntPtr gone = FindAppWindow(port);
+                if (gone == IntPtr.Zero) EnsureVisible(window, dataDir, url, port);
+            }
+            catch (Exception ex) { FileLog.Error("EdgeWindow.Renavigate relaunch: " + ex.Message); }
+        }
+
         // ------------------------------------------------------------------
         // Geometry hook: sizes the app window while it is still hidden.
         // An out-of-process WinEvent hook (no DLL injection) watches
